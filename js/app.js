@@ -391,8 +391,11 @@
       meta: { seed: state.seed, preset: state.presetId, params: state.params }
     });
     var blob = new Blob([svg], { type: 'image/svg+xml' });
-    GA.exporters.saveBlob(blob, fileBase() + '.svg');
-    GA.ui.toast('SVG saved — real vector paths');
+    GA.exporters.saveBlob(blob, fileBase() + '.svg').then(function () {
+      GA.ui.toast('SVG saved — real vector paths');
+    }, function (err) {
+      GA.ui.toast(GA.exporters.explainSaveError(err, 'svg'), 3600);
+    });
   }
 
   function exportPNG() {
@@ -402,8 +405,11 @@
       paper: col.paper, ink: col.ink
     });
     GA.exporters.canvasToBlob(c).then(function (blob) {
-      GA.exporters.saveBlob(blob, fileBase() + '.png');
-      GA.ui.toast('PNG saved (' + c.width + '×' + c.height + ')');
+      return GA.exporters.saveBlob(blob, fileBase() + '.png').then(function () {
+        GA.ui.toast('PNG saved (' + c.width + '×' + c.height + ')');
+      });
+    }).catch(function (err) {
+      GA.ui.toast(GA.exporters.explainSaveError(err, 'png'), 3600);
     });
   }
 
@@ -799,14 +805,29 @@
     save();
   }
 
+  /* Fullscreen is refused outright on iPhone Safari and inside a sandboxed
+     iframe, so every path here has to degrade to a message rather than an
+     unhandled rejection. */
   function toggleFullscreen() {
     var d = document.documentElement;
-    if (!document.fullscreenElement) {
-      (d.requestFullscreen || d.webkitRequestFullscreen || function () {
-        GA.ui.toast('Add to Home Screen for fullscreen on iOS');
-      }).call(d);
-    } else {
-      (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    var noFS = function () {
+      GA.ui.toast('Fullscreen is not available here — on iOS use Share → Add to Home Screen');
+    };
+    try {
+      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        var req = d.requestFullscreen || d.webkitRequestFullscreen;
+        if (!req) return noFS();
+        var r = req.call(d);
+        if (r && r.catch) r.catch(noFS);
+      } else {
+        var exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (exit) {
+          var e = exit.call(document);
+          if (e && e.catch) e.catch(function () {});
+        }
+      }
+    } catch (err) {
+      noFS();
     }
   }
 

@@ -117,7 +117,7 @@
    * browser refuses it we fall back to opening the blob in a new tab so the user
    * can still long-press / share it.
    */
-  function saveBlob(blob, filename) {
+  function anchorSave(blob, filename) {
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
     a.href = url;
@@ -133,6 +133,42 @@
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     }, 4000);
+  }
+
+  /*
+   * Some hosts sandbox the page so it cannot start a download itself — a Claude
+   * Artifact is one — and instead mediate the save through their own confirm
+   * dialog. Use that route when it is there, the ordinary anchor everywhere
+   * else. Resolves when the file is on its way, rejects with a {code, message}
+   * so the caller can say something useful.
+   */
+  function saveBlob(blob, filename) {
+    var c = root.claude;
+    if (!c || typeof c.use !== 'function') {
+      anchorSave(blob, filename);
+      return Promise.resolve({ status: 'saved' });
+    }
+    return c.use('downloads').then(function (downloads) {
+      if (!downloads) {                 // not granted here — try the normal way
+        anchorSave(blob, filename);
+        return { status: 'saved' };
+      }
+      return downloads.save({ filename: filename, data: blob });
+    });
+  }
+
+  /* Turn a host save rejection into something worth reading. */
+  function explainSaveError(err, kind) {
+    var code = (err && err.code) || 'unavailable';
+    if (code === 'declined') return 'Save cancelled';
+    if (code === 'rate_limited') return 'Another save is still open — try again in a moment';
+    if (code === 'too_large') return 'File is too large to save — lower the PNG resolution';
+    if (code === 'extension_not_enabled' || code === 'rejected_extension') {
+      return kind === 'svg'
+        ? 'SVG saving is not allowed here — run the app from its own page to export vectors'
+        : 'This file type cannot be saved here';
+    }
+    return 'Saving is not available in this window';
   }
 
   function canShareFiles() {
@@ -152,6 +188,7 @@
     toCanvas: toCanvas,
     canvasToBlob: canvasToBlob,
     saveBlob: saveBlob,
+    explainSaveError: explainSaveError,
     canShareFiles: canShareFiles,
     shareFile: shareFile,
     PathSink: PathSink

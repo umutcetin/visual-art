@@ -1,0 +1,3618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#faf8f4">
+<meta name="description" content="Generative contour drawings — an offline tool for topographic, biomorphic and architectural line art.">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Contours">
+<title>Contours — generative topographic drawings</title>
+<style>
+/* ==========================================================================
+   Contours — interface styles
+   Mobile first. Phone portrait is the base case; wider viewports move the
+   controls from a bottom sheet into a fixed side panel.
+   ========================================================================== */
+
+:root {
+  /* Interface palette. The ARTWORK's own paper/ink live in js/render.js —
+     they are a print decision, not a theme decision, so they are kept apart. */
+  --ui-bg: #ffffff;          /* panels, bars, popovers */
+  --ui-bg-2: #f3f1ec;        /* recessed surfaces and the area around the sheet */
+  --ui-fg: #16161a;          /* primary text */
+  --ui-on-fg: #faf8f4;       /* text sitting on a --ui-fg fill */
+  --ui-fg-active: #33333a;   /* pressed state of a --ui-fg fill */
+  --ui-line: #e0ddd5;
+  --ui-line-strong: #cdc9bf;
+  --ui-dim: #6f6b62;
+  --chip-bg: rgba(255, 255, 255, 0.92);
+  --overlay-bg: rgba(22, 22, 26, 0.86);   /* hint + toast */
+  --overlay-fg: #ffffff;
+  --scrim: rgba(0, 0, 0, .05);
+  --shadow-sheet: 0 -8px 28px rgba(0, 0, 0, .1);
+  --shadow-pop: 0 12px 34px rgba(0, 0, 0, .18);
+  --shadow-thumb: 0 1px 4px rgba(0, 0, 0, .28);
+  --radius: 12px;
+  --tap: 44px;                       /* minimum touch target */
+  --topbar-h: 56px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --sheet-h: 46vh;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+}
+
+/*
+ * Dark palette. Declared twice on purpose:
+ *   · the media query covers "Auto", the default, where nothing is stamped on
+ *     <html> — guarded so an explicit Light choice still wins on a dark OS
+ *   · the attribute rule covers an explicit Dark choice on a light OS
+ * Only the tokens change; no component rule below knows which theme is active.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ui-bg: #1b1b20;
+    --ui-bg-2: #101013;
+    --ui-fg: #ecebe6;
+    --ui-on-fg: #16161a;
+    --ui-fg-active: #cfcdc6;
+    --ui-line: #2e2e35;
+    --ui-line-strong: #44444e;
+    --ui-dim: #9b968c;
+    --chip-bg: rgba(27, 27, 32, 0.92);
+    --overlay-bg: rgba(236, 235, 230, 0.92);
+    --overlay-fg: #16161a;
+    --scrim: rgba(0, 0, 0, .2);
+    --shadow-sheet: 0 -8px 28px rgba(0, 0, 0, .5);
+    --shadow-pop: 0 12px 34px rgba(0, 0, 0, .55);
+    --shadow-thumb: 0 1px 4px rgba(0, 0, 0, .6);
+  }
+}
+
+:root[data-theme="dark"] {
+  --ui-bg: #1b1b20;
+  --ui-bg-2: #101013;
+  --ui-fg: #ecebe6;
+  --ui-on-fg: #16161a;
+  --ui-fg-active: #cfcdc6;
+  --ui-line: #2e2e35;
+  --ui-line-strong: #44444e;
+  --ui-dim: #9b968c;
+  --chip-bg: rgba(27, 27, 32, 0.92);
+  --overlay-bg: rgba(236, 235, 230, 0.92);
+  --overlay-fg: #16161a;
+  --scrim: rgba(0, 0, 0, .2);
+  --shadow-sheet: 0 -8px 28px rgba(0, 0, 0, .5);
+  --shadow-pop: 0 12px 34px rgba(0, 0, 0, .55);
+  --shadow-thumb: 0 1px 4px rgba(0, 0, 0, .6);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;                  /* no page scrolling, ever */
+  overscroll-behavior: none;
+  background: var(--ui-bg-2);
+  color: var(--ui-fg);
+  font-family: var(--font);
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body { position: fixed; inset: 0; width: 100%; }
+
+button, input, select { font-family: inherit; font-size: inherit; color: inherit; }
+button { touch-action: manipulation; }
+
+/* ── app shell ─────────────────────────────────────────────────────────── */
+
+#app {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  /* minmax(0,1fr) — without it the side panel's content sets a minimum height
+     and pushes the canvas row past the bottom of the screen */
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* ── top bar ───────────────────────────────────────────────────────────── */
+
+#topbar {
+  grid-row: 1;
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  padding: 6px calc(8px + var(--safe-r)) 6px calc(8px + var(--safe-l));
+  padding-top: calc(6px + var(--safe-t));
+  background: var(--ui-bg);
+  border-bottom: 1px solid var(--ui-line);
+  z-index: 36;             /* above the scrim — the top bar never dims */
+}
+
+/* Buttons share the bar evenly and shrink their padding before their height,
+   so every target stays at least 44px tall even on a 320px phone. */
+#topbar .btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 6px;
+  font-size: clamp(12.5px, 3.4vw, 15px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#topbar .btn-more { flex: 0 1 auto; }
+
+.btn {
+  flex: 0 0 auto;
+  min-height: var(--tap);
+  padding: 0 14px;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: 10px;
+  background: var(--ui-bg);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  cursor: pointer;
+  transition: background .12s ease, border-color .12s ease;
+}
+.btn:active { background: var(--ui-bg-2); }
+.btn[aria-expanded="true"] { background: var(--ui-bg-2); border-color: var(--ui-fg); }
+.btn-primary { background: var(--ui-fg); color: var(--ui-on-fg); border-color: var(--ui-fg); }
+.btn-primary:active { background: var(--ui-fg-active); }
+
+/* ── canvas stage ──────────────────────────────────────────────────────── */
+
+#stage {
+  grid-row: 2;
+  position: relative;
+  overflow: hidden;
+  background: var(--ui-bg-2);
+  min-height: 0;
+}
+
+#canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;                /* we handle all gestures ourselves */
+  cursor: crosshair;
+}
+
+.overlay {
+  position: absolute;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  pointer-events: none;
+  z-index: 10;
+}
+.overlay > * { pointer-events: auto; }
+.overlay-top { top: 8px; left: calc(8px + var(--safe-l)); right: 8px; }
+.overlay-bottom {
+  bottom: 8px;
+  left: calc(8px + var(--safe-l));
+  right: 8px;
+  flex-wrap: wrap-reverse;
+  align-items: flex-end;
+}
+
+.chip {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: 999px;
+  background: var(--chip-bg);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.chip-action { min-height: var(--tap); padding: 0 16px; font-size: 14px; font-weight: 500; }
+.chip-quiet { color: var(--ui-dim); cursor: default; }
+.chip-key { color: var(--ui-dim); }
+.chip-val { font-weight: 600; }
+.chip:disabled { opacity: .4; cursor: default; }
+
+.hint {
+  position: absolute;
+  left: 50%;
+  bottom: 78px;
+  max-width: calc(100% - 24px);
+  white-space: normal;
+  text-align: center;
+  transform: translateX(-50%);
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--ui-line-strong);
+  background: var(--overlay-bg);
+  color: var(--overlay-fg);
+  font-size: 12px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .4s ease;
+  z-index: 12;
+}
+.hint.show { opacity: 1; }
+
+/* ── bottom sheet ──────────────────────────────────────────────────────── */
+
+.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  height: calc(var(--sheet-h) + var(--safe-b));
+  max-height: calc(100% - var(--topbar-h) - 40px);
+  background: var(--ui-bg);
+  border-top: 1px solid var(--ui-line);
+  border-radius: 16px 16px 0 0;
+  box-shadow: var(--shadow-sheet);
+  transform: translateY(calc(100% + 4px));
+  transition: transform .26s cubic-bezier(.32, .72, 0, 1);
+  padding-bottom: var(--safe-b);     /* iPhone home indicator */
+}
+.sheet.open { transform: translateY(0); }
+
+.sheet-handle {
+  flex: 0 0 auto;
+  height: 26px;
+  border: 0;
+  background: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.sheet-handle span {
+  display: block;
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ui-line-strong);
+}
+
+.tabs {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 8px 6px;
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.tab {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ui-dim);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.tab[aria-selected="true"] { background: var(--ui-bg-2); color: var(--ui-fg); }
+
+.sheet-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 10px 14px 20px;
+}
+
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* ── sliders ───────────────────────────────────────────────────────────── */
+
+.ctl { padding: 6px 0 10px; }
+
+.ctl-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 30px;
+}
+.ctl-label { font-size: 14px; font-weight: 500; }
+.ctl-sub { display: block; font-size: 11.5px; color: var(--ui-dim); font-weight: 400; margin-top: 1px; }
+
+/* the numeric value doubles as a button that turns into a text field */
+.ctl-val {
+  min-width: 62px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--ui-line);
+  border-radius: 8px;
+  background: var(--ui-bg-2);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  cursor: text;
+}
+input.ctl-val { -moz-appearance: textfield; }
+input.ctl-val::-webkit-outer-spin-button,
+input.ctl-val::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* generous vertical padding gives the thumb a 44px grab area
+   without making the visible track fat */
+.range-wrap { padding: 5px 0; }
+
+input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 34px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+input[type=range]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ui-line-strong);
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 28px;
+  height: 28px;
+  margin-top: -12px;
+  border-radius: 50%;
+  background: var(--ui-fg);
+  border: 3px solid var(--ui-bg);
+  box-shadow: var(--shadow-thumb);
+}
+input[type=range]::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ui-line-strong);
+}
+input[type=range]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--ui-fg);
+  border: 3px solid var(--ui-bg);
+}
+
+/* ── segmented control ─────────────────────────────────────────────────── */
+
+.seg {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--ui-bg-2);
+}
+.seg button {
+  flex: 1 1 0;
+  min-height: 38px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  font-size: 14px;
+  cursor: pointer;
+  color: var(--ui-dim);
+}
+.seg button[aria-pressed="true"] { background: var(--ui-bg); color: var(--ui-fg); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+
+/* ── export panel ──────────────────────────────────────────────────────── */
+
+.stack { display: flex; flex-direction: column; gap: 10px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.row > .btn { flex: 1 1 140px; }
+
+.toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: var(--tap);
+  padding: 0 12px;
+  border: 1px solid var(--ui-line);
+  border-radius: 10px;
+  background: var(--ui-bg);
+  font-size: 14px;
+  cursor: pointer;
+}
+.toggle input { width: 22px; height: 22px; accent-color: var(--ui-fg); }
+
+.note { font-size: 12.5px; line-height: 1.5; color: var(--ui-dim); margin: 2px 0 0; }
+.section-title { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--ui-dim); margin: 14px 0 4px; }
+
+/* ── popovers, scrim, toast ────────────────────────────────────────────── */
+
+/* Deliberately very light: the artwork has to stay readable while the sheet
+   is open, since that is the whole point of tuning parameters. */
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  z-index: 35;
+}
+
+/* Lift the canvas chips above the sheet so Fit / Undo stay reachable. */
+body.sheet-open .overlay-bottom {
+  transform: translateY(calc(-1 * (var(--sheet-h) + var(--safe-b))));
+  transition: transform .26s cubic-bezier(.32, .72, 0, 1);
+}
+body.sheet-open .hint { display: none; }
+
+.popover {
+  position: fixed;
+  z-index: 60;
+  min-width: 230px;
+  max-width: min(320px, calc(100vw - 20px));
+  padding: 6px;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: 14px;
+  background: var(--ui-bg);
+  box-shadow: var(--shadow-pop);
+}
+.menu-item, .preset-item {
+  display: block;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  text-align: left;
+  font-size: 15px;
+  cursor: pointer;
+}
+.menu-item:active, .preset-item:active { background: var(--ui-bg-2); }
+.preset-item strong { display: block; font-weight: 600; }
+.preset-item small { display: block; color: var(--ui-dim); font-size: 12px; margin-top: 2px; line-height: 1.35; }
+.preset-item[aria-current="true"] { background: var(--ui-bg-2); }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + var(--safe-b));
+  transform: translateX(-50%);
+  z-index: 80;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--ui-line-strong);
+  background: var(--overlay-bg);
+  color: var(--overlay-fg);
+  font-size: 13.5px;
+  max-width: calc(100vw - 32px);
+  text-align: center;
+}
+
+/* ==========================================================================
+   Wide layout — landscape phone, tablet and desktop.
+   Canvas on the left, controls docked on the right.
+   ========================================================================== */
+
+@media (min-width: 760px), (orientation: landscape) and (min-width: 620px) {
+  #app {
+    grid-template-columns: minmax(0, 1fr) 336px;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  #topbar { grid-column: 1 / -1; }
+  /* plenty of room here — no need to stretch the buttons across the bar */
+  #topbar .btn { flex: 0 0 auto; padding: 0 14px; font-size: 15px; }
+  body.sheet-open .overlay-bottom { transform: none; }
+  #stage { grid-column: 1; grid-row: 2; }
+
+  .sheet {
+    position: relative;
+    grid-column: 2;
+    grid-row: 2;
+    height: auto;
+    max-height: none;
+    transform: none;
+    border-top: 0;
+    border-left: 1px solid var(--ui-line);
+    border-radius: 0;
+    box-shadow: none;
+    padding-bottom: 0;
+    transition: none;
+  }
+  .sheet.collapsed { display: none; }
+  .sheet-handle { display: none; }
+  .sheet-body { padding-bottom: calc(20px + var(--safe-b)); }
+  .scrim { display: none !important; }
+  #btnSettings { display: none; }        /* panel is always there */
+  .overlay-bottom { bottom: calc(8px + var(--safe-b)); }
+}
+
+@media (min-width: 1100px) {
+  #app { grid-template-columns: 1fr 380px; }
+}
+
+/* Landscape phones are short — give the canvas as much height as possible. */
+@media (orientation: landscape) and (max-height: 460px) {
+  :root { --topbar-h: 48px; --tap: 42px; }
+  .btn { min-height: 40px; padding: 0 12px; font-size: 14px; }
+  #topbar { padding-top: 4px; padding-bottom: 4px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet, .hint { transition: none; }
+}
+
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── top bar: essential actions only ───────────────────────────── -->
+  <header id="topbar">
+    <button id="btnGenerate" class="btn btn-primary">Generate</button>
+    <button id="btnRandom" class="btn">Random</button>
+    <button id="btnPresets" class="btn" aria-haspopup="true" aria-expanded="false">Presets</button>
+    <button id="btnSettings" class="btn" aria-expanded="false">Settings</button>
+    <button id="btnMore" class="btn btn-more" aria-haspopup="true" aria-expanded="false">More</button>
+  </header>
+
+  <!-- ── canvas stage ──────────────────────────────────────────────── -->
+  <main id="stage">
+    <canvas id="canvas"></canvas>
+
+    <div id="overlayTop" class="overlay overlay-top">
+      <button id="seedChip" class="chip" title="Tap to type a seed">
+        <span class="chip-key">seed</span><span id="seedValue" class="chip-val">—</span>
+      </button>
+      <span id="presetChip" class="chip chip-quiet">Topographic</span>
+    </div>
+
+    <div id="overlayBottom" class="overlay overlay-bottom">
+      <button id="btnFit" class="chip chip-action">Fit to screen</button>
+      <button id="btnUndoQuick" class="chip chip-action" disabled>Undo</button>
+      <span id="statusChip" class="chip chip-quiet" hidden></span>
+    </div>
+
+    <div id="hint" class="hint">Tap to add a seed · drag to move · long-press to remove</div>
+  </main>
+
+  <!-- ── controls: bottom sheet on phones, side panel when wide ────── -->
+  <section id="sheet" class="sheet" aria-label="Settings">
+    <button id="sheetHandle" class="sheet-handle" aria-label="Collapse settings"><span></span></button>
+    <nav id="tabs" class="tabs" role="tablist"></nav>
+    <div id="sheetBody" class="sheet-body"></div>
+  </section>
+
+  <div id="scrim" class="scrim" hidden></div>
+
+  <!-- ── popovers ──────────────────────────────────────────────────── -->
+  <div id="presetMenu" class="popover" hidden role="menu" aria-label="Presets"></div>
+  <div id="moreMenu" class="popover" hidden role="menu" aria-label="More actions">
+    <button class="menu-item" data-act="undo">Undo last generation</button>
+    <button class="menu-item" data-act="reset">Reset everything</button>
+    <button class="menu-item" data-act="fit">Fit to screen</button>
+    <button class="menu-item" data-act="theme" id="miTheme">Switch to dark mode</button>
+    <button class="menu-item" data-act="png">Download PNG</button>
+    <button class="menu-item" data-act="svg">Download SVG</button>
+    <button class="menu-item" data-act="share">Share…</button>
+    <button class="menu-item" data-act="fullscreen">Fullscreen</button>
+    <button class="menu-item" data-act="seedcopy">Copy settings link</button>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+</div>
+
+<script>
+/* ---- js/rng.js ---- */
+/*
+ * rng.js — deterministic pseudo random numbers.
+ *
+ * Everything in the generator is driven by one integer seed so that the same
+ * seed always reproduces exactly the same drawing. We never call Math.random()
+ * inside the generation pipeline.
+ */
+(function (root) {
+  'use strict';
+  var GA = (root.GA = root.GA || {});
+
+  /* mulberry32 — small, fast, good enough distribution for graphics work. */
+  function mulberry32(a) {
+    a = a >>> 0;
+    return function () {
+      a = (a + 0x6d2b79f5) | 0;
+      var t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function RNG(seed) {
+    this._n = mulberry32(seed | 0);
+  }
+
+  /* uniform [0,1) */
+  RNG.prototype.next = function () {
+    return this._n();
+  };
+  /* uniform [a,b) */
+  RNG.prototype.f = function (a, b) {
+    return a + (b - a) * this._n();
+  };
+  /* integer [a,b] inclusive */
+  RNG.prototype.i = function (a, b) {
+    return a + Math.floor(this._n() * (b - a + 1));
+  };
+  /* true with probability p */
+  RNG.prototype.chance = function (p) {
+    return this._n() < p;
+  };
+  RNG.prototype.pick = function (arr) {
+    return arr[Math.floor(this._n() * arr.length) % arr.length];
+  };
+  /* roughly normal, mean 0 stddev 1 (sum of 3 uniforms) */
+  RNG.prototype.gauss = function () {
+    return (this._n() + this._n() + this._n() - 1.5) * 1.4142;
+  };
+  /* a fresh independent stream, derived deterministically */
+  RNG.prototype.fork = function (salt) {
+    return new RNG((Math.floor(this._n() * 0xffffffff) ^ (salt | 0)) | 0);
+  };
+
+  GA.RNG = RNG;
+  GA.randomSeed = function () {
+    return (Math.floor(Math.random() * 0xffffff) + 1) | 0;
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* ---- js/noise.js ---- */
+/*
+ * noise.js — seeded 2D gradient (Perlin) noise + fractal Brownian motion.
+ *
+ * Used for two things only:
+ *   1. domain warping   — bends the whole distance field so contours flow
+ *   2. additive jitter  — makes the spacing between contours slightly uneven
+ *
+ * Both are deliberately low frequency: high frequency noise reads as "glitch",
+ * which is exactly the look we are avoiding.
+ */
+(function (root) {
+  'use strict';
+  var GA = (root.GA = root.GA || {});
+
+  var GRAD = [
+    [1, 1], [-1, 1], [1, -1], [-1, -1],
+    [1, 0], [-1, 0], [0, 1], [0, -1]
+  ];
+
+  function fade(t) {
+    return t * t * t * (t * (t * 6 - 15) + 10);
+  }
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  /* Returns a noise2(x,y) function in roughly [-1, 1]. */
+  function makeNoise2D(rng) {
+    var perm = new Uint8Array(256);
+    var i, j, t;
+    for (i = 0; i < 256; i++) perm[i] = i;
+    for (i = 255; i > 0; i--) {
+      j = Math.floor(rng.next() * (i + 1));
+      t = perm[i]; perm[i] = perm[j]; perm[j] = t;
+    }
+    var p = new Uint8Array(512);
+    for (i = 0; i < 512; i++) p[i] = perm[i & 255];
+
+    function grad(hash, dx, dy) {
+      var g = GRAD[hash & 7];
+      return g[0] * dx + g[1] * dy;
+    }
+
+    return function noise2(x, y) {
+      var xi = Math.floor(x), yi = Math.floor(y);
+      var xf = x - xi, yf = y - yi;
+      var X = xi & 255, Y = yi & 255;
+      var u = fade(xf), v = fade(yf);
+      var aa = p[p[X] + Y], ba = p[p[X + 1] + Y];
+      var ab = p[p[X] + Y + 1], bb = p[p[X + 1] + Y + 1];
+      var x1 = lerp(grad(aa, xf, yf), grad(ba, xf - 1, yf), u);
+      var x2 = lerp(grad(ab, xf, yf - 1), grad(bb, xf - 1, yf - 1), u);
+      return lerp(x1, x2, v);
+    };
+  }
+
+  /* Classic fBm: a few octaves of the same noise at doubling frequency. */
+  function makeFbm(noise2, octaves, gain) {
+    octaves = octaves || 3;
+    gain = gain == null ? 0.5 : gain;
+    // normalising factor so the result stays roughly in [-1,1]
+    var norm = 0, a = 1, o;
+    for (o = 0; o < octaves; o++) { norm += a; a *= gain; }
+    return function (x, y) {
+      var amp = 1, freq = 1, sum = 0, k;
+      for (k = 0; k < octaves; k++) {
+        sum += amp * noise2(x * freq, y * freq);
+        amp *= gain;
+        freq *= 2.03; // slightly off 2.0 to avoid visible axis alignment
+      }
+      return sum / norm;
+    };
+  }
+
+  GA.makeNoise2D = makeNoise2D;
+  GA.makeFbm = makeFbm;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* ---- js/edt.js ---- */
+/*
+ * edt.js — exact Euclidean distance transform (Felzenszwalb & Huttenlocher).
+ *
+ * WHY THIS MATTERS FOR THE ART
+ * ----------------------------
+ * A contour map looks right when successive lines are *truly parallel* — i.e.
+ * every line sits at a constant distance from the previous one. If you grow
+ * curves by offsetting points along normals you get self intersections and
+ * corners. Instead we build a distance field once and slice it at even levels:
+ * every level set is then automatically a perfect offset curve, smooth, non
+ * self-intersecting, and it merges/splits gracefully. This transform is what
+ * makes that cheap: O(number of cells), independent of how many seeds there are.
+ */
+(function (root) {
+  'use strict';
+  var GA = (root.GA = root.GA || {});
+
+  var INF = 1e20;
+
+  /*
+   * 1D squared distance transform of a sampled function f.
+   * v/z are scratch buffers (length n and n+1). Writes squared distances into d
+   * and, if `src` is given, the index of the winning site into src.
+   */
+  function edt1d(f, d, src, v, z, n) {
+    var k = 0, q, s;
+    v[0] = 0;
+    z[0] = -INF;
+    z[1] = INF;
+    for (q = 1; q < n; q++) {
+      s = (f[q] + q * q - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      while (s <= z[k]) {
+        k--;
+        s = (f[q] + q * q - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      }
+      k++;
+      v[k] = q;
+      z[k] = s;
+      z[k + 1] = INF;
+    }
+    k = 0;
+    for (q = 0; q < n; q++) {
+      while (z[k + 1] < q) k++;
+      var dq = q - v[k];
+      d[q] = dq * dq + f[v[k]];
+      if (src) src[q] = v[k];
+    }
+  }
+
+  /*
+   * 2D transform.
+   *   mask   : Uint8Array, 1 = site ("inside"), 0 = empty
+   *   out    : Float32Array receiving SQUARED distance in cell units
+   *   nearest: optional Int32Array receiving the flat index of the nearest site
+   */
+  function edt2d(mask, gw, gh, out, nearest) {
+    var n = Math.max(gw, gh);
+    var f = new Float64Array(n);
+    var d = new Float64Array(n);
+    var v = new Int32Array(n);
+    var z = new Float64Array(n + 1);
+    var srcY = nearest ? new Int32Array(gw * gh) : null;
+    var srcLine = nearest ? new Int32Array(n) : null;
+    var x, y, i;
+
+    // pass 1 — down each column
+    for (x = 0; x < gw; x++) {
+      for (y = 0; y < gh; y++) f[y] = mask[y * gw + x] ? 0 : INF;
+      edt1d(f, d, srcLine, v, z, gh);
+      for (y = 0; y < gh; y++) {
+        out[y * gw + x] = d[y];
+        if (nearest) srcY[y * gw + x] = srcLine[y];
+      }
+    }
+
+    // pass 2 — along each row
+    for (y = 0; y < gh; y++) {
+      for (x = 0; x < gw; x++) f[x] = out[y * gw + x];
+      edt1d(f, d, srcLine, v, z, gw);
+      for (x = 0; x < gw; x++) {
+        i = y * gw + x;
+        out[i] = d[x];
+        if (nearest) {
+          // winning column is srcLine[x]; within that column the winning row
+          // was recorded during pass 1
+          var sx = srcLine[x];
+          nearest[i] = srcY[y * gw + sx] * gw + sx;
+        }
+      }
+    }
+    return out;
+  }
+
+  GA.edt2d = edt2d;
+  GA.EDT_INF = INF;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* ---- js/field.js ---- */
+/*
+ * field.js — builds the scalar field whose level sets ARE the contour lines.
+ *
+ * Pipeline for one generation:
+ *
+ *   1. rasterise every seed shape into a coarse grid  -> mask + group id
+ *   2. exact distance transform of the mask           -> signed distance to the
+ *                                                        union of all seeds
+ *   3. blur slightly                                  -> rounds the creases
+ *                                                        where two shapes meet
+ *                                                        (soft merging, rule 4)
+ *   4. add a ridge along the boundary between groups  -> systems push away from
+ *                                                        each other and flow
+ *                                                        around (rule 3)
+ *   5. domain warp + additive noise                   -> organic irregularity
+ *                                                        (rule 5)
+ *
+ * Slicing that field at 0, s, 2s, 3s ... gives lines that are everywhere ~s
+ * apart, always smooth, never crossing.
+ */
+(function (root) {
+  'use strict';
+  var GA = (root.GA = root.GA || {});
+
+  /* --------------------------------------------------------------------- */
+  /* Seed outline                                                          */
+  /* --------------------------------------------------------------------- */
+
+  /*
+   * Radius of a seed's closed curve at angle `th`.
+   * Two ingredients:
+   *   - a few low harmonics -> soft biomorphic blob
+   *   - an optional regular polygon term -> soft ceramic-tile geometry
+   * They are blended by seed.geo (the "Geometry" slider).
+   */
+  function seedRadius(s, th) {
+    var m = 1, h, k;
+    for (k = 0; k < s.harm.length; k++) {
+      h = s.harm[k];
+      m += h.a * Math.cos(h.m * th + h.p);
+    }
+    if (s.geo > 0.001) {
+      var N = s.sides;
+      var step = (Math.PI * 2) / N;
+      var a = th + s.rot;
+      a = a - Math.floor(a / step) * step - step * 0.5; // fold into [-step/2, step/2]
+      var poly = Math.cos(Math.PI / N) / Math.cos(a);   // inradius-normalised n-gon
+      m *= 1 - s.geo + s.geo * poly;
+    }
+    return s.r * m;
+  }
+
+  /* Largest possible radius — used to size the rasterisation bounding box. */
+  function seedMaxRadius(s) {
+    var m = 1, k;
+    for (k = 0; k < s.harm.length; k++) m += Math.abs(s.harm[k].a);
+    return s.r * m * 1.05;
+  }
+
+  var LUT_N = 1024;
+
+  /* Cache the whole angular profile so the inner loops never call cos/atan2 on
+     the harmonics — just one table lookup plus a lerp. */
+  function seedLUT(s) {
+    if (s._lut) return s._lut;         // cleared by resolveSeeds when params move
+    var lut = new Float32Array(LUT_N + 1);
+    for (var i = 0; i <= LUT_N; i++) {
+      lut[i] = seedRadius(s, (i / LUT_N) * Math.PI * 2 - Math.PI);
+    }
+    s._lut = lut;
+    return lut;
+  }
+
+  /* --------------------------------------------------------------------- */
+  /* Small helpers                                                         */
+  /* --------------------------------------------------------------------- */
+
+  /* Separable box blur, run twice -> close enough to a Gaussian, and cheap. */
+  function blur(src, tmp, gw, gh, r) {
+    if (r < 1) return src;
+    var inv = 1 / (2 * r + 1);
+    var x, y, i, sum, k;
+    // horizontal
+    for (y = 0; y < gh; y++) {
+      var row = y * gw;
+      sum = 0;
+      for (k = -r; k <= r; k++) sum += src[row + Math.min(gw - 1, Math.max(0, k))];
+      for (x = 0; x < gw; x++) {
+        tmp[row + x] = sum * inv;
+        var add = row + Math.min(gw - 1, x + r + 1);
+        var sub = row + Math.max(0, x - r);
+        sum += src[add] - src[sub];
+      }
+    }
+    // vertical
+    for (x = 0; x < gw; x++) {
+      sum = 0;
+      for (k = -r; k <= r; k++) sum += tmp[Math.min(gh - 1, Math.max(0, k)) * gw + x];
+      for (y = 0; y < gh; y++) {
+        src[y * gw + x] = sum * inv;
+        var addY = Math.min(gh - 1, y + r + 1) * gw + x;
+        var subY = Math.max(0, y - r) * gw + x;
+        sum += tmp[addY] - tmp[subY];
+      }
+    }
+    return src;
+  }
+
+  /* Bilinear sample of a grid, clamped at the borders. */
+  function sample(F, gw, gh, gx, gy) {
+    if (gx < 0) gx = 0; else if (gx > gw - 1.001) gx = gw - 1.001;
+    if (gy < 0) gy = 0; else if (gy > gh - 1.001) gy = gh - 1.001;
+    var x0 = gx | 0, y0 = gy | 0;
+    var fx = gx - x0, fy = gy - y0;
+    var i = y0 * gw + x0;
+    var a = F[i], b = F[i + 1], c = F[i + gw], d = F[i + gw + 1];
+    return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
+  }
+
+  /* --------------------------------------------------------------------- */
+  /* Main entry                                                            */
+  /* --------------------------------------------------------------------- */
+
+  /*
+   * grid  : {gw, gh, cell, ox, oy}   (ox/oy = world coords of grid cell 0,0)
+   * seeds : array of seed objects
+   * P     : {sp, distortion, repulsion, mergeBlur}
+   * noise : {warp: fbm, jitter: fbm}
+   *
+   * Returns a Float32Array of signed distances in *world* units.
+   */
+  function buildField(grid, seeds, P, noise) {
+    var gw = grid.gw, gh = grid.gh, cell = grid.cell, ox = grid.ox, oy = grid.oy;
+    var n = gw * gh;
+    var i, x, y, si;
+
+    var mask = new Uint8Array(n);
+    var group = new Int32Array(n);
+    for (i = 0; i < n; i++) group[i] = -1;
+
+    /* --- 1. rasterise seeds ------------------------------------------- */
+    for (si = 0; si < seeds.length; si++) {
+      var s = seeds[si];
+      var rmax = s.rMax;
+      var x0 = Math.max(0, Math.floor((s.x - rmax - ox) / cell));
+      var x1 = Math.min(gw - 1, Math.ceil((s.x + rmax - ox) / cell));
+      var y0 = Math.max(0, Math.floor((s.y - rmax - oy) / cell));
+      var y1 = Math.min(gh - 1, Math.ceil((s.y + rmax - oy) / cell));
+      var painted = false;
+      for (y = y0; y <= y1; y++) {
+        var wy = oy + y * cell - s.y;
+        for (x = x0; x <= x1; x++) {
+          var wx = ox + x * cell - s.x;
+          var len = Math.sqrt(wx * wx + wy * wy);
+          if (len <= seedRadius(s, Math.atan2(wy, wx))) {
+            i = y * gw + x;
+            mask[i] = 1;
+            group[i] = s.group;
+            painted = true;
+          }
+        }
+      }
+      // a seed smaller than one grid cell would vanish — keep at least one cell
+      if (!painted) {
+        var cx = Math.round((s.x - ox) / cell);
+        var cy = Math.round((s.y - oy) / cell);
+        if (cx >= 0 && cx < gw && cy >= 0 && cy < gh) {
+          i = cy * gw + cx;
+          mask[i] = 1;
+          group[i] = s.group;
+        }
+      }
+    }
+
+    /* --- 2. signed distance to the union of all seeds ------------------ */
+    var d2out = new Float32Array(n);
+    var nearest = new Int32Array(n);
+    GA.edt2d(mask, gw, gh, d2out, nearest);
+
+    var inv = new Uint8Array(n);
+    for (i = 0; i < n; i++) inv[i] = mask[i] ? 0 : 1;
+    var d2in = new Float32Array(n);
+    GA.edt2d(inv, gw, gh, d2in, null);
+
+    var F = new Float32Array(n);
+    for (i = 0; i < n; i++) {
+      // outside: +distance to shape, inside: -distance to boundary
+      F[i] = (Math.sqrt(d2out[i]) - Math.sqrt(d2in[i])) * cell;
+    }
+
+    /*
+     * --- 2b. keep the seed's geometry in the OUTER rings ----------------
+     *
+     * A true distance offset rounds every corner away: after a few rings a
+     * hexagon has become a circle. That is physically correct but it throws
+     * away the tile / ceramic character we want. So we also build a purely
+     * radial field (|p-c| minus the seed's own profile at that angle), whose
+     * level sets keep the angular signature at every radius, and cross-fade
+     * between the two with the Geometry slider.
+     */
+    if (P.geometry > 0.02) {
+      var Frad = new Float32Array(n);
+      var BIG = 1e9;
+      for (i = 0; i < n; i++) Frad[i] = BIG;
+      var reach = P.sp * (P.layers + 2);
+      for (si = 0; si < seeds.length; si++) {
+        var sd = seeds[si];
+        var lut = seedLUT(sd);
+        var R = reach + sd.rMax;
+        var bx0 = Math.max(0, Math.floor((sd.x - R - ox) / cell));
+        var bx1 = Math.min(gw - 1, Math.ceil((sd.x + R - ox) / cell));
+        var by0 = Math.max(0, Math.floor((sd.y - R - oy) / cell));
+        var by1 = Math.min(gh - 1, Math.ceil((sd.y + R - oy) / cell));
+        var k = LUT_N / (Math.PI * 2);
+        for (y = by0; y <= by1; y++) {
+          var ry = oy + y * cell - sd.y;
+          for (x = bx0; x <= bx1; x++) {
+            var rx = ox + x * cell - sd.x;
+            var t = (Math.atan2(ry, rx) + Math.PI) * k;
+            var ti = t | 0;
+            var tf = t - ti;
+            var rad = lut[ti] + (lut[ti + 1] - lut[ti]) * tf;
+            var v = Math.sqrt(rx * rx + ry * ry) - rad;
+            i = y * gw + x;
+            if (v < Frad[i]) Frad[i] = v;
+          }
+        }
+      }
+      var g = P.geometry;
+      for (i = 0; i < n; i++) {
+        if (Frad[i] < BIG) F[i] += g * (Frad[i] - F[i]);
+      }
+    }
+
+    /* --- 3. soften merges --------------------------------------------- */
+    var tmp = new Float32Array(n);
+    var blurR = Math.round(Math.min(6, Math.max(0, (P.sp / cell) * P.mergeBlur)));
+    if (blurR >= 1) blur(F, tmp, gw, gh, blurR);
+
+    /* --- 4. repulsion ridge between different groups ------------------- */
+    if (P.repulsion > 0.001) {
+      var seam = new Uint8Array(n);
+      var anySeam = false;
+      for (y = 0; y < gh; y++) {
+        for (x = 0; x < gw; x++) {
+          i = y * gw + x;
+          var g0 = group[nearest[i]];
+          if (x + 1 < gw && group[nearest[i + 1]] !== g0) { seam[i] = 1; seam[i + 1] = 1; anySeam = true; }
+          if (y + 1 < gh && group[nearest[i + gw]] !== g0) { seam[i] = 1; seam[i + gw] = 1; anySeam = true; }
+        }
+      }
+      if (anySeam) {
+        var d2seam = new Float32Array(n);
+        GA.edt2d(seam, gw, gh, d2seam, null);
+        // squared distance keeps the bump C1-smooth right on the seam
+        var w2 = P.sp * P.sp * 1.15;
+        var amp = P.repulsion * P.sp * 2.3;
+        var c2 = cell * cell;
+        for (i = 0; i < n; i++) {
+          F[i] += amp * Math.exp(-(d2seam[i] * c2) / w2);
+        }
+      }
+    }
+
+    /* --- 5. domain warp + jitter --------------------------------------- */
+    if (P.distortion > 0.001) {
+      var out = new Float32Array(n);
+      /*
+       * The warp is deliberately LONG wavelength (about twenty line spacings).
+       * Short-wavelength warping reads as noise or glitch; long wavelength
+       * pulls whole systems into lobed, flowing shapes while every line stays
+       * locally parallel to its neighbour. The second, much finer term only
+       * nudges the spacing so it is never mechanically even.
+       */
+      var fq = 1 / (P.sp * 20);
+      var fq2 = 1 / (P.sp * 3.5);
+      var amp2 = P.distortion * P.sp * 4.6;
+      var jit = P.distortion * P.sp * 0.42;
+      for (y = 0; y < gh; y++) {
+        for (x = 0; x < gw; x++) {
+          i = y * gw + x;
+          var wxx = ox + x * cell, wyy = oy + y * cell;
+          var dx = noise.warp(wxx * fq, wyy * fq) * amp2;
+          var dy = noise.warp(wxx * fq + 91.37, wyy * fq - 17.71) * amp2;
+          out[i] = sample(F, gw, gh, (wxx + dx - ox) / cell, (wyy + dy - oy) / cell) +
+                   noise.jitter(wxx * fq2 - 40.1, wyy * fq2 + 12.9) * jit;
+        }
+      }
+      F = out;
+    }
+
+    return F;
+  }
+
+  GA.seedRadius = seedRadius;
+  GA.seedMaxRadius = seedMaxRadius;
+  GA.buildField = buildField;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* ---- js/contour.js ---- */
+/*
+ * contour.js — marching squares with proper polyline stitching.
+ *
+ * Slices the scalar field at a given level and returns closed loops / open
+ * chains as flat [x0,y0,x1,y1,...] arrays in GRID coordinates.
+ *
+ * Implementation notes:
+ *  - Every crossing point lives on a grid edge, and each edge is shared by two
+ *    cells. By keying points on the *edge index* (not on floating point
+ *    coordinates) the chains stitch together exactly, with no epsilon matching.
+ *  - Buffers are allocated once per Tracer and reused for every level, so
+ *    extracting 40 levels costs almost nothing extra.
+ *  - Saddle cells (5 and 10) are disambiguated with the cell centre average,
+ *    which keeps the topology consistent and avoids "bow tie" crossings.
+ */
+(function (root) {
+  'use strict';
+  var GA = (root.GA = root.GA || {});
+
+  function Tracer(gw, gh) {
+    this.gw = gw;
+    this.gh = gh;
+    var E = 2 * gw * gh; // edge slots: horizontal block then vertical block
+    this.px = new Float32Array(E);
+    this.py = new Float32Array(E);
+    this.nb0 = new Int32Array(E);
+    this.nb1 = new Int32Array(E);
+    this.deg = new Uint8Array(E);
+    this.stamp = new Int32Array(E);  // "has this edge a point for this level?"
+    this.vis = new Int32Array(E);    // "already consumed by a chain?"
+    this.touched = new Int32Array(E);
+    this.cur = 0;
+  }
+
+  /* Extract every polyline of F at `level`. Returns array of {pts, closed}. */
+  Tracer.prototype.trace = function (F, level) {
+    var gw = this.gw, gh = this.gh;
+    var px = this.px, py = this.py, nb0 = this.nb0, nb1 = this.nb1;
+    var deg = this.deg, stamp = this.stamp, vis = this.vis, touched = this.touched;
+    var s = ++this.cur;
+    var nTouched = 0;
+    var HB = 0, VB = gw * gh; // block offsets for horizontal / vertical edges
+
+    /* Lazily create the interpolated point sitting on a horizontal edge. */
+    function edgeH(x, y) {
+      var e = HB + y * gw + x;
+      if (stamp[e] !== s) {
+        stamp[e] = s;
+        deg[e] = 0;
+        vis[e] = 0;
+        var i = y * gw + x;
+        var a = F[i], b = F[i + 1];
+        var t = (level - a) / (b - a);
+        if (!(t >= 0)) t = 0; else if (t > 1) t = 1;
+        px[e] = x + t;
+        py[e] = y;
+        touched[nTouched++] = e;
+      }
+      return e;
+    }
+    function edgeV(x, y) {
+      var e = VB + y * gw + x;
+      if (stamp[e] !== s) {
+        stamp[e] = s;
+        deg[e] = 0;
+        vis[e] = 0;
+        var i = y * gw + x;
+        var a = F[i], b = F[i + gw];
+        var t = (level - a) / (b - a);
+        if (!(t >= 0)) t = 0; else if (t > 1) t = 1;
+        px[e] = x;
+        py[e] = y + t;
+        touched[nTouched++] = e;
+      }
+      return e;
+    }
+    function link(a, b) {
+      if (deg[a] === 0) nb0[a] = b; else if (deg[a] === 1) nb1[a] = b; else return;
+      deg[a]++;
+      if (deg[b] === 0) nb0[b] = a; else if (deg[b] === 1) nb1[b] = a; else return;
+      deg[b]++;
+    }
+
+    var x, y;
+    for (y = 0; y < gh - 1; y++) {
+      for (x = 0; x < gw - 1; x++) {
+        var i0 = y * gw + x;
+        var c00 = F[i0], c10 = F[i0 + 1];
+        var c01 = F[i0 + gw], c11 = F[i0 + gw + 1];
+        var idx = (c00 < level ? 1 : 0) | (c10 < level ? 2 : 0) |
+                  (c11 < level ? 4 : 0) | (c01 < level ? 8 : 0);
+        if (idx === 0 || idx === 15) continue;
+
+        // T = top edge, R = right, B = bottom, L = left
+        switch (idx) {
+          case 1: case 14: link(edgeH(x, y), edgeV(x, y)); break;              // T-L
+          case 2: case 13: link(edgeH(x, y), edgeV(x + 1, y)); break;          // T-R
+          case 3: case 12: link(edgeV(x, y), edgeV(x + 1, y)); break;          // L-R
+          case 4: case 11: link(edgeV(x + 1, y), edgeH(x, y + 1)); break;      // R-B
+          case 6: case 9:  link(edgeH(x, y), edgeH(x, y + 1)); break;          // T-B
+          case 7: case 8:  link(edgeV(x, y), edgeH(x, y + 1)); break;          // L-B
+          case 5:
+            // c00 & c11 inside — is the centre inside too?
+            if ((c00 + c10 + c01 + c11) * 0.25 < level) {
+              link(edgeH(x, y), edgeV(x + 1, y));      // T-R
+              link(edgeV(x, y), edgeH(x, y + 1));      // L-B
+            } else {
+              link(edgeH(x, y), edgeV(x, y));          // T-L
+              link(edgeV(x + 1, y), edgeH(x, y + 1));  // R-B
+            }
+            break;
+          case 10:
+            if ((c00 + c10 + c01 + c11) * 0.25 < level) {
+              link(edgeH(x, y), edgeV(x, y));          // T-L
+              link(edgeV(x + 1, y), edgeH(x, y + 1));  // R-B
+            } else {
+              link(edgeH(x, y), edgeV(x + 1, y));      // T-R
+              link(edgeV(x, y), edgeH(x, y + 1));      // L-B
+            }
+            break;
+        }
+      }
+    }
+
+    /* Walk chains: dangling ends first (open lines), then remaining loops. */
+    var result = [];
+    var k, e;
+
+    function walk(start) {
+      var pts = [];
+      var prev = -1, cur = start, closed = false;
+      for (;;) {
+        vis[cur] = s;
+        pts.push(px[cur], py[cur]);
+        var a = deg[cur] > 0 ? nb0[cur] : -1;
+        var b = deg[cur] > 1 ? nb1[cur] : -1;
+        var nxt = -1;
+        if (a !== -1 && a !== prev) nxt = a;
+        else if (b !== -1 && b !== prev) nxt = b;
+        if (nxt === -1) break;
+        if (nxt === start) { closed = true; break; }
+        if (vis[nxt] === s) break;
+        prev = cur;
+        cur = nxt;
+      }
+      if (pts.length >= 6) result.push({ pts: pts, closed: closed });
+    }
+
+    for (k = 0; k < nTouched; k++) {
+      e = touched[k];
+      if (deg[e] === 1 && vis[e] !== s) walk(e);
+    }
+    for (k = 0; k < nTouched; k++) {
+      e = touched[k];
+      if (vis[e] !== s && deg[e] >= 2) walk(e);
+    }
+    return result;
+  };
+
+  GA.Tracer = Tracer;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* ---- js/geom.js ---- */
+/*
+ * geom.js — polyline post processing.
+ *
+ * Raw marching-squares output is a staircase of tiny segments. To get the soft,
+ * drawn-by-hand quality we want, each chain goes through:
+ *
+ *     resample (even spacing) -> Laplacian smoothing -> Catmull-Rom -> cubic Bézier
+ *
+ * The Bézier step is important for export: the SVG then contains real curve
+ * commands rather than thousands of line segments, which is what a plotter,
+ * laser cutter or Illustrator actually wants.
+ */
+(function (root) {
+  'use strict';
+  var GA = (root.GA = root.GA || {});
+
+  function polyLength(p, closed) {
+    var L = 0, n = p.length / 2, i, ax, ay, bx, by;
+    for (i = 0; i < n - 1; i++) {
+      ax = p[i * 2]; ay = p[i * 2 + 1];
+      bx = p[i * 2 + 2]; by = p[i * 2 + 3];
+      L += Math.hypot(bx - ax, by - ay);
+    }
+    if (closed && n > 1) L += Math.hypot(p[0] - p[(n - 1) * 2], p[1] - p[(n - 1) * 2 + 1]);
+    return L;
+  }
+
+  /* Resample to (approximately) uniform arc-length steps. */
+  function resample(p, step, closed) {
+    var pts = p;
+    var n = pts.length / 2;
+    if (n < 2) return pts;
+    if (closed) { pts = pts.slice(); pts.push(pts[0], pts[1]); n++; }
+
+    var out = [pts[0], pts[1]];
+    var carry = 0, i;
+    for (i = 0; i < n - 1; i++) {
+      var ax = pts[i * 2], ay = pts[i * 2 + 1];
+      var bx = pts[i * 2 + 2], by = pts[i * 2 + 3];
+      var seg = Math.hypot(bx - ax, by - ay);
+      if (seg < 1e-9) continue;
+      var t = step - carry;
+      while (t <= seg) {
+        var u = t / seg;
+        out.push(ax + (bx - ax) * u, ay + (by - ay) * u);
+        t += step;
+      }
+      carry = seg - (t - step);
+    }
+    if (closed) {
+      // drop a trailing point that lands on top of the first one
+      var m = out.length / 2;
+      if (m > 2 && Math.hypot(out[out.length - 2] - out[0], out[out.length - 1] - out[1]) < step * 0.5) {
+        out.length -= 2;
+      }
+    } else {
+      out.push(pts[(n - 1) * 2], pts[(n - 1) * 2 + 1]);
+    }
+    return out;
+  }
+
+  /* Laplacian smoothing — removes the marching-squares staircase. */
+  function smooth(p, closed, iters, lambda) {
+    var n = p.length / 2;
+    if (n < 3) return p;
+    var a = p.slice(), b = new Array(p.length), it, i, pi, ni;
+    for (it = 0; it < iters; it++) {
+      for (i = 0; i < n; i++) {
+        if (!closed && (i === 0 || i === n - 1)) {
+          b[i * 2] = a[i * 2]; b[i * 2 + 1] = a[i * 2 + 1];
+          continue;
+        }
+        pi = (i - 1 + n) % n;
+        ni = (i + 1) % n;
+        b[i * 2] = a[i * 2] + lambda * ((a[pi * 2] + a[ni * 2]) * 0.5 - a[i * 2]);
+        b[i * 2 + 1] = a[i * 2 + 1] + lambda * ((a[pi * 2 + 1] + a[ni * 2 + 1]) * 0.5 - a[i * 2 + 1]);
+      }
+      var t = a; a = b; b = t;
+    }
+    return a;
+  }
+
+  /* Extract the piece of a polyline between arc lengths a and b. */
+  function slice(p, closed, a, b) {
+    var pts = p, n = p.length / 2;
+    if (closed) { pts = p.slice(); pts.push(p[0], p[1]); n++; }
+    var out = [], acc = 0, i;
+    for (i = 0; i < n - 1; i++) {
+      var ax = pts[i * 2], ay = pts[i * 2 + 1];
+      var bx = pts[i * 2 + 2], by = pts[i * 2 + 3];
+      var seg = Math.hypot(bx - ax, by - ay);
+      if (seg < 1e-9) continue;
+      var s0 = acc, s1 = acc + seg;
+      if (s1 > a && s0 < b) {
+        var u0 = Math.max(0, (a - s0) / seg);
+        var u1 = Math.min(1, (b - s0) / seg);
+        if (out.length === 0) out.push(ax + (bx - ax) * u0, ay + (by - ay) * u0);
+        out.push(ax + (bx - ax) * u1, ay + (by - ay) * u1);
+      }
+      acc = s1;
+      if (acc >= b) break;
+    }
+    return out;
+  }
+
+  /*
+   * Break a contour into dashes. Returns {parts, gaps} where `gaps` holds the
+   * midpoint of each removed piece — those are the places where a secondary
+   * seed is allowed to appear (rules 6 and 7).
+   */
+  function applyGaps(p, closed, rng, opt) {
+    var total = polyLength(p, closed);
+    if (opt.prob <= 0.0001 || total < opt.every * 0.8) {
+      return { parts: [{ pts: p, closed: closed }], gaps: [] };
+    }
+    var intervals = [], gaps = [];
+    var drawStart = 0, probe = 0;
+    var guard = 0;
+    while (guard++ < 400) {
+      probe += rng.f(opt.every * 0.6, opt.every * 1.6);
+      if (probe >= total) { intervals.push([drawStart, total]); break; }
+      if (rng.chance(opt.prob)) {
+        var glen = rng.f(opt.min, opt.max);
+        if (probe - drawStart > opt.minSeg) intervals.push([drawStart, probe]);
+        gaps.push(probe + glen * 0.5);
+        drawStart = probe + glen;
+        probe = drawStart;
+        if (drawStart >= total) break;
+      }
+    }
+
+    var parts = [], i;
+    for (i = 0; i < intervals.length; i++) {
+      var seg = slice(p, closed, intervals[i][0], intervals[i][1]);
+      if (seg.length >= 6) parts.push({ pts: seg, closed: false });
+    }
+    // convert gap arc-lengths into actual points on the curve
+    var gapPts = [];
+    for (i = 0; i < gaps.length; i++) {
+      var g = slice(p, closed, Math.max(0, gaps[i] - 0.5), gaps[i] + 0.5);
+      if (g.length >= 2) gapPts.push([g[0], g[1]]);
+    }
+    return { parts: parts, gaps: gapPts };
+  }
+
+  /*
+   * Emit a smooth path through `pts` as cubic Béziers (Catmull-Rom converted).
+   * `sink` only needs moveTo / bezierCurveTo / closePath, so the exact same code
+   * feeds both the canvas renderer and the SVG exporter.
+   */
+  function emitPath(p, closed, sink) {
+    var n = p.length / 2;
+    if (n < 2) return;
+    var i, p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y;
+    sink.moveTo(p[0], p[1]);
+    if (n === 2) {
+      sink.bezierCurveTo(p[0], p[1], p[2], p[3], p[2], p[3]);
+      return;
+    }
+    var last = closed ? n : n - 1;
+    for (i = 0; i < last; i++) {
+      var i0 = closed ? (i - 1 + n) % n : Math.max(0, i - 1);
+      var i1 = i;
+      var i2 = closed ? (i + 1) % n : Math.min(n - 1, i + 1);
+      var i3 = closed ? (i + 2) % n : Math.min(n - 1, i + 2);
+      p0x = p[i0 * 2]; p0y = p[i0 * 2 + 1];
+      p1x = p[i1 * 2]; p1y = p[i1 * 2 + 1];
+      p2x = p[i2 * 2]; p2y = p[i2 * 2 + 1];
+      p3x = p[i3 * 2]; p3y = p[i3 * 2 + 1];
+      sink.bezierCurveTo(
+        p1x + (p2x - p0x) / 6, p1y + (p2y - p0y) / 6,
+        p2x - (p3x - p1x) / 6, p2y - (p3y - p1y) / 6,
+        p2x, p2y
+      );
+    }
+    if (closed && sink.closePath) sink.closePath();
+  }
+
+  GA.geom = {
+    polyLength: polyLength,
+    resample: resample,
+    smooth: smooth,
+    slice: slice,
+    applyGaps: applyGaps,
+    emitPath: emitPath
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* ---- js/presets.js ---- */
+/*
+ * presets.js — parameter defaults and the four named looks.
+ */
+(function (root) {
+  'use strict';
+  var GA = (root.GA = root.GA || {});
+
+  var DEFAULTS = {
+    shapes: 5,
+    layout: 'scatter',   // scatter | grid | cluster
+    geometry: 0.15,      // 0 = organic blob, 1 = soft polygon
+    scale: 1,
+    layers: 12,
+    spacing: 14,
+    lineWidth: 1.1,
+    distortion: 0.35,
+    repulsion: 0.35,
+    merge: 0.35,
+    gapProb: 0.12,
+    secondary: 0.3
+  };
+
+  var PRESETS = [
+    {
+      id: 'topographic',
+      name: 'Topographic',
+      note: 'Even, calm contour lines — a survey map.',
+      params: {
+        shapes: 5, layout: 'scatter', geometry: 0.08, scale: 1,
+        layers: 15, spacing: 11.5, lineWidth: 0.95,
+        distortion: 0.22, repulsion: 0.34, merge: 0.35,
+        gapProb: 0.05, secondary: 0.18
+      }
+    },
+    {
+      id: 'organic',
+      name: 'Organic',
+      note: 'More deformation, asymmetry and merging.',
+      params: {
+        shapes: 6, layout: 'scatter', geometry: 0.05, scale: 1.05,
+        layers: 11, spacing: 15, lineWidth: 1.15,
+        distortion: 0.62, repulsion: 0.2, merge: 0.62,
+        gapProb: 0.14, secondary: 0.5
+      }
+    },
+    {
+      id: 'tile',
+      name: 'Tile',
+      note: 'Structured and decorative, soft ceramic geometry.',
+      params: {
+        shapes: 9, layout: 'grid', geometry: 0.8, scale: 0.9,
+        layers: 11, spacing: 14, lineWidth: 1.3,
+        distortion: 0.12, repulsion: 0.62, merge: 0.18,
+        gapProb: 0.04, secondary: 0.1
+      }
+    },
+    {
+      id: 'ruins',
+      name: 'Ruins',
+      note: 'Sparse and architectural, slowly overgrown.',
+      params: {
+        shapes: 5, layout: 'cluster', geometry: 0.6, scale: 1.2,
+        layers: 6, spacing: 22, lineWidth: 1.2,
+        distortion: 0.72, repulsion: 0.72, merge: 0.15,
+        gapProb: 0.38, secondary: 0.65
+      }
+    }
+  ];
+
+  GA.DEFAULTS = DEFAULTS;
+  GA.PRESETS = PRESETS;
+  GA.presetById = function (id) {
+    for (var i = 0; i < PRESETS.length; i++) if (PRESETS[i].id === id) return PRESETS[i];
+    return null;
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* ---- js/generator.js ---- */
+/*
+ * generator.js — seed placement and the full generation pass.
+ *
+ * Output shape:
+ *   { artW, artH, paths: [ {pts:[x,y,...], closed:bool, w:number} ], seeds:[...] }
+ *
+ * `paths` is resolution independent: the canvas renderer and the SVG exporter
+ * both consume it, which is why the SVG contains genuine vector geometry.
+ */
+(function (root) {
+  'use strict';
+  var GA = (root.GA = root.GA || {});
+
+  /*
+   * Two quality tiers. `preview` is what runs while a slider or a seed is being
+   * dragged: coarser grid, fewer noise octaves, lighter smoothing. It is visually
+   * very close but several times cheaper, which keeps dragging at interactive
+   * speed on a phone. The full pass runs once, on release.
+   */
+  var QUALITY = {
+    preview: { res: 128, smoothIters: 2, octaves: 2, cellCap: 0.7, maxCells: 90000 },
+    full: { res: 340, smoothIters: 4, octaves: 3, cellCap: 0.55, maxCells: 220000 }
+  };
+
+  /* --------------------------------------------------------------------- */
+  /* Seed creation                                                          */
+  /* --------------------------------------------------------------------- */
+
+  function makeSeed(rng, x, y, params, groupPool, opts) {
+    opts = opts || {};
+    var harm = [];
+    var count = rng.i(2, 3);
+    var used = {};
+    for (var k = 0; k < count; k++) {
+      var m = rng.pick([2, 3, 3, 4, 5]);
+      if (used[m]) m = m + 1;
+      used[m] = 1;
+      harm.push({
+        m: m,
+        a: rng.f(0.05, 0.17) * (opts.small ? 0.7 : 1),
+        p: rng.f(0, Math.PI * 2)
+      });
+    }
+    /*
+     * Group id decides who merges with whom. A new seed either joins an
+     * existing group (their contour systems will fuse into one bigger organic
+     * shape) or starts its own (their contours will push apart). That is what
+     * makes "sometimes merge" controllable rather than random-looking.
+     */
+    var group;
+    if (groupPool.length && rng.chance(params.merge)) {
+      group = rng.pick(groupPool);
+    } else {
+      group = groupPool.length ? Math.max.apply(null, groupPool) + 1 : 0;
+      groupPool.push(group);
+    }
+
+    var s = {
+      x: x,
+      y: y,
+      rr: opts.small ? rng.f(0.55, 0.95) : rng.f(1.1, 2.3),
+      harm: harm,
+      geoJ: rng.f(0.72, 1),      // per-seed geometry jitter, applied at resolve
+      geo: 0,
+      sides: rng.i(4, 7),
+      rot: rng.f(0, Math.PI * 2),
+      group: group,
+      small: !!opts.small
+    };
+    return s;
+  }
+
+  /*
+   * Derive the per-seed values that depend on the live parameters. Radii are
+   * expressed as a multiple of the contour spacing so the whole composition
+   * stays coherent when you change Spacing or Overall scale.
+   */
+  function resolveSeeds(seeds, params) {
+    var sp = params.spacing * params.scale;
+    for (var i = 0; i < seeds.length; i++) {
+      var s = seeds[i];
+      s.r = s.rr * sp;
+      s.geo = params.geometry * (s.geoJ == null ? 1 : s.geoJ);
+      s.rMax = GA.seedMaxRadius(s);
+      s._lut = null;                   // angular profile cache is now stale
+    }
+    return seeds;
+  }
+
+  /*
+   * Three placement strategies. Each one deliberately leaves a large empty
+   * region so the finished drawing keeps its negative space (rule 9) and is
+   * balanced without being symmetric (rule 10).
+   */
+  function placeSeeds(rng, params, artW, artH) {
+    var n = params.shapes;
+    var sp = params.spacing * params.scale;
+    var reach = sp * params.layers;
+    var short = Math.min(artW, artH);
+    // keep most of each system on the page — a little clipping reads as a map
+    // crop, a lot just looks like a mistake
+    var margin = params.layout === 'grid'
+      ? short * 0.08                    // a lattice should fill the page
+      : Math.max(short * 0.09, Math.min(short * 0.34, reach * 0.62));
+    var seeds = [];
+    var pool = [];
+    var i, tries;
+
+    // a randomly placed "void" the seeds avoid — the main negative-space device
+    var void_ = {
+      x: rng.f(margin, artW - margin),
+      y: rng.f(margin, artH - margin),
+      r: Math.min(artW, artH) * rng.f(0.16, 0.3)
+    };
+
+    if (params.layout === 'grid') {
+      // jittered lattice — reads as decorative / tile-like
+      var cols = Math.max(2, Math.round(Math.sqrt(n * (artW / artH))));
+      var rows = Math.max(1, Math.ceil(n / cols));
+      var cw = (artW - margin * 2) / cols;
+      var ch = (artH - margin * 2) / rows;
+      var cells = [];
+      for (var r = 0; r < rows; r++) {
+        for (var c = 0; c < cols; c++) cells.push([c, r]);
+      }
+      // shuffle then take n
+      for (i = cells.length - 1; i > 0; i--) {
+        var j = rng.i(0, i);
+        var t = cells[i]; cells[i] = cells[j]; cells[j] = t;
+      }
+      for (i = 0; i < Math.min(n, cells.length); i++) {
+        var cx = margin + (cells[i][0] + 0.5) * cw + rng.gauss() * cw * 0.16;
+        var cy = margin + (cells[i][1] + 0.5) * ch + rng.gauss() * ch * 0.16;
+        seeds.push(makeSeed(rng, cx, cy, params, pool));
+      }
+    } else if (params.layout === 'cluster') {
+      // two loose clusters — sparse, architectural, lots of empty ground
+      var nc = rng.i(1, 2);
+      var centers = [];
+      for (i = 0; i < nc; i++) {
+        // biased towards the middle of the sheet, but never centred on it
+        centers.push([
+          Math.max(artW * 0.3, Math.min(artW * 0.7, artW * 0.5 + rng.gauss() * artW * 0.19)),
+          Math.max(artH * 0.3, Math.min(artH * 0.7, artH * 0.5 + rng.gauss() * artH * 0.19))
+        ]);
+      }
+      var spread = reach * 0.85;
+      for (i = 0; i < n; i++) {
+        var ctr = rng.pick(centers);
+        var px = ctr[0] + rng.gauss() * spread * 0.6;
+        var py = ctr[1] + rng.gauss() * spread * 0.6;
+        px = Math.max(margin, Math.min(artW - margin, px));
+        py = Math.max(margin, Math.min(artH - margin, py));
+        seeds.push(makeSeed(rng, px, py, params, pool));
+      }
+    } else {
+      /*
+       * Scatter: best-candidate sampling. The separation is deliberately close
+       * to a full system diameter — neighbouring contour systems should meet
+       * and deform at their edges, not sit on top of each other. That is what
+       * preserves the negative space (rules 8 and 9).
+       */
+      var minDist = Math.max(reach * 1.15, sp * 4);
+      for (i = 0; i < n; i++) {
+        var best = null, bestScore = -1;
+        for (tries = 0; tries < 40; tries++) {
+          var qx = rng.f(margin, artW - margin);
+          var qy = rng.f(margin, artH - margin);
+          if (Math.hypot(qx - void_.x, qy - void_.y) < void_.r) continue;
+          var d = 1e9, m;
+          for (m = 0; m < seeds.length; m++) {
+            d = Math.min(d, Math.hypot(qx - seeds[m].x, qy - seeds[m].y));
+          }
+          if (d > bestScore) { bestScore = d; best = [qx, qy]; }
+          if (d > minDist) break;
+        }
+        if (best) seeds.push(makeSeed(rng, best[0], best[1], params, pool));
+      }
+    }
+    return seeds;
+  }
+
+  /* --------------------------------------------------------------------- */
+  /* Generation                                                             */
+  /* --------------------------------------------------------------------- */
+
+  function makeGrid(artW, artH, sp, Q) {
+    var pad = sp * 2.2;
+    var w = artW + pad * 2, h = artH + pad * 2;
+    var cell = Math.max(w, h) / Q.res;
+    // never let the grid be so coarse that contours alias into polygons
+    cell = Math.min(cell, sp * Q.cellCap);
+    var gw = Math.max(8, Math.ceil(w / cell) + 1);
+    var gh = Math.max(8, Math.ceil(h / cell) + 1);
+    // very small spacing at large scale would otherwise ask for a grid big
+    // enough to stall a phone — trade a little crispness for staying responsive
+    if (gw * gh > Q.maxCells) {
+      cell *= Math.sqrt((gw * gh) / Q.maxCells);
+      gw = Math.max(8, Math.ceil(w / cell) + 1);
+      gh = Math.max(8, Math.ceil(h / cell) + 1);
+    }
+    return { gw: gw, gh: gh, cell: cell, ox: -pad, oy: -pad };
+  }
+
+  /*
+   * One full pass: field -> contours -> smoothing -> gaps.
+   * `collectGaps` makes it also return candidate positions for secondary seeds.
+   */
+  function pass(seeds, params, quality, rngSeed, artW, artH, collectGaps) {
+    var Q = QUALITY[quality] || QUALITY.full;
+    var sp = params.spacing * params.scale;
+    resolveSeeds(seeds, params);
+
+    var grid = makeGrid(artW, artH, sp, Q);
+    var nrng = new GA.RNG(rngSeed ^ 0x51ed270b);
+    var n2 = GA.makeNoise2D(nrng);
+    var n3 = GA.makeNoise2D(nrng);
+    var noise = {
+      warp: GA.makeFbm(n2, Q.octaves, 0.5),
+      jitter: GA.makeFbm(n3, Math.max(1, Q.octaves - 1), 0.5)
+    };
+
+    var F = GA.buildField(grid, seeds, {
+      sp: sp,
+      layers: params.layers,
+      geometry: params.geometry,
+      distortion: params.distortion,
+      repulsion: params.repulsion,
+      mergeBlur: 0.34
+    }, noise);
+
+    var tracer = new GA.Tracer(grid.gw, grid.gh);
+    var rng = new GA.RNG(rngSeed ^ 0x2f9e3a17);
+    var paths = [];
+    var gapPoints = [];
+    var step = Math.max(grid.cell * 1.05, sp * 0.16);
+    var minLen = sp * 1.3;
+
+    var gapOpt = {
+      prob: params.gapProb,
+      every: sp * 4.2,
+      min: sp * 0.8,
+      max: sp * 2.9,
+      minSeg: sp * 1.2
+    };
+
+    for (var L = 0; L < params.layers; L++) {
+      var level = L * sp;
+      var chains = tracer.trace(F, level);
+      for (var c = 0; c < chains.length; c++) {
+        var ch = chains[c];
+        // grid -> world
+        var p = ch.pts;
+        for (var k = 0; k < p.length; k += 2) {
+          p[k] = grid.ox + p[k] * grid.cell;
+          p[k + 1] = grid.oy + p[k + 1] * grid.cell;
+        }
+        if (GA.geom.polyLength(p, ch.closed) < minLen) continue; // drop specks
+
+        p = GA.geom.resample(p, step, ch.closed);
+        if (p.length < 6) continue;
+        p = GA.geom.smooth(p, ch.closed, Q.smoothIters, 0.55);
+
+        /*
+         * Thin the point set before it becomes Béziers. The curve is already
+         * smooth, so one control point every half-spacing tracks it to well
+         * under a line width — and it cuts the exported SVG (and the redraw
+         * cost) by roughly three. Short loops keep a floor of ~14 points so
+         * small inner rings do not collapse into triangles.
+         */
+        var plen = GA.geom.polyLength(p, ch.closed);
+        var outStep = Math.min(Math.max(sp * 0.5, grid.cell), plen / 14);
+        if (outStep > step * 1.2) {
+          p = GA.geom.resample(p, outStep, ch.closed);
+          if (p.length < 6) continue;
+        }
+
+        // innermost line is the seed outline itself — draw it a touch heavier
+        var w = params.lineWidth * (L === 0 ? 1.35 : 1);
+
+        if (params.gapProb > 0.0001 && L > 0) {
+          var g = GA.geom.applyGaps(p, ch.closed, rng, gapOpt);
+          for (var q = 0; q < g.parts.length; q++) {
+            g.parts[q].w = w;
+            paths.push(g.parts[q]);
+          }
+          if (collectGaps) {
+            for (var z = 0; z < g.gaps.length; z++) gapPoints.push(g.gaps[z]);
+          }
+        } else {
+          paths.push({ pts: p, closed: ch.closed, w: w });
+        }
+      }
+    }
+
+    return { paths: paths, gapPoints: gapPoints, grid: grid };
+  }
+
+  /*
+   * Rule 7: some of the gaps we punched into the contours become the birthplace
+   * of a new small seed. We find the gaps in a first pass, add the seeds, then
+   * rebuild — so the little shapes genuinely interact with the field around
+   * them instead of being pasted on top.
+   */
+  function deriveSecondary(gapPoints, seeds, params, rng, artW, artH) {
+    if (!gapPoints.length || params.secondary <= 0.001) return [];
+    var sp = params.spacing * params.scale;
+    var out = [];
+    var pool = [];
+    for (var i = 0; i < seeds.length; i++) {
+      if (pool.indexOf(seeds[i].group) === -1) pool.push(seeds[i].group);
+    }
+    var maxNew = Math.max(1, Math.round(params.shapes * 0.9 * params.secondary));
+    var minSep = sp * 3.2;
+    var order = gapPoints.slice();
+    // shuffle so we do not always pick the same (outermost) contours
+    for (i = order.length - 1; i > 0; i--) {
+      var j = rng.i(0, i);
+      var t = order[i]; order[i] = order[j]; order[j] = t;
+    }
+    for (i = 0; i < order.length && out.length < maxNew; i++) {
+      if (!rng.chance(params.secondary * 0.5)) continue;
+      var px = order[i][0], py = order[i][1];
+      if (px < sp || py < sp || px > artW - sp || py > artH - sp) continue;
+      var ok = true, m;
+      for (m = 0; m < seeds.length; m++) {
+        if (Math.hypot(px - seeds[m].x, py - seeds[m].y) < minSep) { ok = false; break; }
+      }
+      for (m = 0; m < out.length && ok; m++) {
+        if (Math.hypot(px - out[m].x, py - out[m].y) < minSep) ok = false;
+      }
+      if (!ok) continue;
+      out.push(makeSeed(rng, px, py, params, pool, { small: true }));
+    }
+    return out;
+  }
+
+  /*
+   * Public entry point.
+   *   state.seed    numeric random seed
+   *   state.params  all slider values
+   *   state.seeds   primary seeds (user editable)
+   *   state.secondary cached secondary seeds (null = recompute)
+   */
+  function generate(state, quality) {
+    var params = state.params;
+    var artW = state.artW, artH = state.artH;
+    var primary = state.seeds;
+
+    var secondary = state.secondary;
+    if (quality === 'full' && secondary === null && params.secondary > 0.001) {
+      var probe = pass(primary.slice(), params, 'preview', state.seed, artW, artH, true);
+      var srng = new GA.RNG(state.seed ^ 0x7a4b19c3);
+      secondary = deriveSecondary(probe.gapPoints, primary, params, srng, artW, artH);
+      state.secondary = secondary;
+    }
+    var all = primary.concat(secondary || []);
+
+    var r = pass(all, params, quality, state.seed, artW, artH, false);
+    return {
+      artW: artW,
+      artH: artH,
+      paths: r.paths,
+      quality: quality,
+      seeds: all
+    };
+  }
+
+  GA.generator = {
+    generate: generate,
+    placeSeeds: placeSeeds,
+    makeSeed: makeSeed,
+    resolveSeeds: resolveSeeds
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* ---- js/render.js ---- */
+/*
+ * render.js — draws a generated artwork onto a 2D canvas.
+ *
+ * The renderer never touches the generation data; it only walks `art.paths` and
+ * emits Béziers. Panning and zooming therefore cost a redraw, not a regenerate.
+ */
+(function (root) {
+  'use strict';
+  var GA = (root.GA = root.GA || {});
+
+  /*
+   * The artwork has two colour pairs, and they are a *drawing* decision rather
+   * than an interface theme: PRINT is what gets exported and fabricated, SCREEN
+   * is the inverted pair used when the app is in dark mode so a phone at night
+   * is not showing a blazing white rectangle.
+   */
+  var PRINT = { paper: '#faf8f4', ink: '#16161a' };
+  var SCREEN_DARK = { paper: '#141418', ink: '#e9e7e1' };
+
+  var PAPER = PRINT.paper;
+  var INK = PRINT.ink;
+
+  /*
+   * ctx      canvas 2D context (already sized in device pixels)
+   * art      {artW, artH, paths}
+   * opt      {view:{x,y,k}, dpr, width, height, plotter:bool, background:bool,
+   *           frame:bool}
+   */
+  function draw(ctx, art, opt) {
+    var dpr = opt.dpr || 1;
+    var v = opt.view;
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, opt.width, opt.height);
+
+    // page behind the artboard (only visible on screen, never in export)
+    if (opt.pageColor) {
+      ctx.fillStyle = opt.pageColor;
+      ctx.fillRect(0, 0, opt.width, opt.height);
+    }
+
+    ctx.setTransform(dpr * v.k, 0, 0, dpr * v.k, dpr * v.x, dpr * v.y);
+
+    if (opt.background !== false) {
+      ctx.fillStyle = opt.paper || PAPER;
+      ctx.fillRect(0, 0, art.artW, art.artH);
+    }
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, art.artW, art.artH);
+    ctx.clip();
+
+    ctx.strokeStyle = opt.ink || INK;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.miterLimit = 2;
+
+    // batch by stroke width so we set state as rarely as possible
+    var buckets = groupByWidth(art.paths, opt.plotter);
+    for (var b = 0; b < buckets.length; b++) {
+      var bucket = buckets[b];
+      ctx.lineWidth = bucket.w;
+      ctx.beginPath();
+      for (var i = 0; i < bucket.paths.length; i++) {
+        var p = bucket.paths[i];
+        GA.geom.emitPath(p.pts, p.closed, ctx);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    if (opt.frame) {
+      ctx.strokeStyle = opt.frameColor || 'rgba(0,0,0,0.16)';
+      ctx.lineWidth = 1 / v.k;
+      ctx.strokeRect(0, 0, art.artW, art.artH);
+    }
+  }
+
+  /* In plotter mode every line gets exactly the same weight. */
+  function groupByWidth(paths, plotter) {
+    var map = {}, order = [], i, key;
+    for (i = 0; i < paths.length; i++) {
+      var w = plotter ? 1 : paths[i].w;
+      key = w.toFixed(3);
+      if (!map[key]) { map[key] = { w: w, paths: [] }; order.push(key); }
+      map[key].paths.push(paths[i]);
+    }
+    return order.map(function (k) { return map[k]; });
+  }
+
+  /* Draw the seed handles (screen space, never exported). */
+  function drawSeeds(ctx, seeds, opt) {
+    var dpr = opt.dpr || 1, v = opt.view;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // handles read as ink on paper, so they invert along with the drawing
+    var fill = opt.ink || INK;
+    var halo = opt.paper || PAPER;
+    for (var i = 0; i < seeds.length; i++) {
+      var s = seeds[i];
+      var sx = s.x * v.k + v.x;
+      var sy = s.y * v.k + v.y;
+      var active = opt.activeIndex === i;
+      var r = active ? 9 : 5.5;
+      ctx.globalAlpha = active ? 0.9 : 0.3;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.strokeStyle = halo;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  GA.render = {
+    draw: draw, drawSeeds: drawSeeds, groupByWidth: groupByWidth,
+    PAPER: PAPER, INK: INK, PRINT: PRINT, SCREEN_DARK: SCREEN_DARK
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* ---- js/exporters.js ---- */
+/*
+ * exporters.js — PNG, SVG and Web Share.
+ *
+ * The SVG writer walks exactly the same path list the screen renderer uses and
+ * emits `M ... C ...` commands. There is no <image> tag anywhere: the file is
+ * genuine vector geometry that a plotter or laser cutter can consume directly.
+ */
+(function (root) {
+  'use strict';
+  var GA = (root.GA = root.GA || {});
+
+  /* A tiny sink object with the same interface as CanvasRenderingContext2D. */
+  function PathSink(dec) {
+    this.d = '';
+    this.k = Math.pow(10, dec == null ? 2 : dec);
+  }
+  PathSink.prototype._n = function (v) {
+    var r = Math.round(v * this.k) / this.k;
+    return r === 0 ? '0' : String(r);
+  };
+  PathSink.prototype.moveTo = function (x, y) {
+    this.d += (this.d ? ' ' : '') + 'M' + this._n(x) + ' ' + this._n(y);
+  };
+  PathSink.prototype.bezierCurveTo = function (x1, y1, x2, y2, x, y) {
+    this.d += ' C' + this._n(x1) + ' ' + this._n(y1) + ' ' +
+              this._n(x2) + ' ' + this._n(y2) + ' ' +
+              this._n(x) + ' ' + this._n(y);
+  };
+  PathSink.prototype.closePath = function () { this.d += ' Z'; };
+
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  /*
+   * opt: {background:bool, plotter:bool, ink:string, meta:{seed, preset}}
+   */
+  function toSVG(art, opt) {
+    opt = opt || {};
+    var W = art.artW, H = art.artH;
+    var ink = opt.ink || GA.render.INK;
+    var out = [];
+    out.push('<?xml version="1.0" encoding="UTF-8"?>');
+    out.push('<svg xmlns="http://www.w3.org/2000/svg" version="1.1" ' +
+      'width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">');
+    if (opt.meta) {
+      out.push('  <title>Contour study — seed ' + esc(opt.meta.seed) + '</title>');
+      out.push('  <desc>' + esc(JSON.stringify(opt.meta)) + '</desc>');
+    }
+    out.push('  <defs><clipPath id="board"><rect x="0" y="0" width="' + W +
+      '" height="' + H + '"/></clipPath></defs>');
+    if (opt.background !== false) {
+      out.push('  <rect x="0" y="0" width="' + W + '" height="' + H +
+        '" fill="' + (opt.paper || GA.render.PAPER) + '"/>');
+    }
+    out.push('  <g clip-path="url(#board)" fill="none" stroke="' + ink +
+      '" stroke-linecap="round" stroke-linejoin="round">');
+
+    var buckets = GA.render.groupByWidth(art.paths, opt.plotter);
+    for (var b = 0; b < buckets.length; b++) {
+      var bucket = buckets[b];
+      out.push('    <g stroke-width="' + (Math.round(bucket.w * 1000) / 1000) + '">');
+      for (var i = 0; i < bucket.paths.length; i++) {
+        var sink = new PathSink(2);
+        GA.geom.emitPath(bucket.paths[i].pts, bucket.paths[i].closed, sink);
+        if (sink.d) out.push('      <path d="' + sink.d + '"/>');
+      }
+      out.push('    </g>');
+    }
+    out.push('  </g>');
+    out.push('</svg>');
+    return out.join('\n');
+  }
+
+  /* Render the artwork to an offscreen canvas at `scale` x artboard size. */
+  function toCanvas(art, opt) {
+    opt = opt || {};
+    var scale = opt.scale || 2;
+    var c = document.createElement('canvas');
+    c.width = Math.round(art.artW * scale);
+    c.height = Math.round(art.artH * scale);
+    var ctx = c.getContext('2d');
+    GA.render.draw(ctx, art, {
+      dpr: 1,
+      width: c.width,
+      height: c.height,
+      view: { x: 0, y: 0, k: scale },
+      background: opt.background !== false,
+      paper: opt.paper,
+      ink: opt.ink,
+      plotter: opt.plotter,
+      frame: false
+    });
+    return c;
+  }
+
+  function canvasToBlob(canvas) {
+    return new Promise(function (resolve) {
+      if (canvas.toBlob) canvas.toBlob(resolve, 'image/png');
+      else {
+        var url = canvas.toDataURL('image/png');
+        resolve(dataURLtoBlob(url));
+      }
+    });
+  }
+
+  function dataURLtoBlob(url) {
+    var parts = url.split(',');
+    var bin = atob(parts[1]);
+    var arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: 'image/png' });
+  }
+
+  /*
+   * Saving on iOS Safari: the anchor+download route works from iOS 13 up. If the
+   * browser refuses it we fall back to opening the blob in a new tab so the user
+   * can still long-press / share it.
+   */
+  function anchorSave(blob, filename) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    try {
+      a.click();
+    } catch (e) {
+      window.open(url, '_blank');
+    }
+    setTimeout(function () {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 4000);
+  }
+
+  /*
+   * Some hosts sandbox the page so it cannot start a download itself — a Claude
+   * Artifact is one — and instead mediate the save through their own confirm
+   * dialog. Use that route when it is there, the ordinary anchor everywhere
+   * else. Resolves when the file is on its way, rejects with a {code, message}
+   * so the caller can say something useful.
+   */
+  function saveBlob(blob, filename) {
+    var c = root.claude;
+    if (!c || typeof c.use !== 'function') {
+      anchorSave(blob, filename);
+      return Promise.resolve({ status: 'saved' });
+    }
+    return c.use('downloads').then(function (downloads) {
+      if (!downloads) {                 // not granted here — try the normal way
+        anchorSave(blob, filename);
+        return { status: 'saved' };
+      }
+      return downloads.save({ filename: filename, data: blob });
+    });
+  }
+
+  /* Turn a host save rejection into something worth reading. */
+  function explainSaveError(err, kind) {
+    var code = (err && err.code) || 'unavailable';
+    if (code === 'declined') return 'Save cancelled';
+    if (code === 'rate_limited') return 'Another save is still open — try again in a moment';
+    if (code === 'too_large') return 'File is too large to save — lower the PNG resolution';
+    if (code === 'extension_not_enabled' || code === 'rejected_extension') {
+      return kind === 'svg'
+        ? 'SVG saving is not allowed here — run the app from its own page to export vectors'
+        : 'This file type cannot be saved here';
+    }
+    return 'Saving is not available in this window';
+  }
+
+  function canShareFiles() {
+    return !!(navigator.canShare && navigator.share);
+  }
+
+  function shareFile(blob, filename, title) {
+    var file = new File([blob], filename, { type: blob.type });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      return navigator.share({ files: [file], title: title });
+    }
+    return Promise.reject(new Error('unsupported'));
+  }
+
+  GA.exporters = {
+    toSVG: toSVG,
+    toCanvas: toCanvas,
+    canvasToBlob: canvasToBlob,
+    saveBlob: saveBlob,
+    explainSaveError: explainSaveError,
+    canShareFiles: canShareFiles,
+    shareFile: shareFile,
+    PathSink: PathSink
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* ---- js/ui.js ---- */
+/*
+ * ui.js — control construction and chrome behaviour.
+ *
+ * The controls are described as data and rendered into tabbed panels, so the
+ * phone never shows a long vertical wall of sliders: five short sections
+ * (Shape, Contours, Distortion, Gaps, Export) with at most four controls each.
+ *
+ * Slider protocol: dragging emits phase 'preview' (cheap regeneration), letting
+ * go emits phase 'commit' (full quality).
+ */
+(function (root) {
+  'use strict';
+  var GA = (root.GA = root.GA || {});
+
+  var SECTIONS = [
+    { id: 'shape', label: 'Shape' },
+    { id: 'contours', label: 'Contours' },
+    { id: 'distortion', label: 'Distortion' },
+    { id: 'gaps', label: 'Gaps' },
+    { id: 'export', label: 'Export' }
+  ];
+
+  /*
+   * `relayout: true` means changing this value re-places the seed shapes.
+   * Everything else keeps the existing seeds so you can tune a composition you
+   * already like.
+   */
+  var CONTROLS = [
+    { sec: 'shape', type: 'slider', key: 'shapes', label: 'Initial shapes',
+      sub: 'How many seed forms to start from', min: 2, max: 14, step: 1, dec: 0, relayout: true },
+    { sec: 'shape', type: 'seg', key: 'layout', label: 'Placement',
+      options: [['scatter', 'Scatter'], ['grid', 'Grid'], ['cluster', 'Cluster']], relayout: true },
+    { sec: 'shape', type: 'slider', key: 'geometry', label: 'Geometry',
+      sub: 'Organic blob → soft polygon', min: 0, max: 1, step: 0.01, dec: 2 },
+    { sec: 'shape', type: 'slider', key: 'scale', label: 'Overall scale',
+      sub: 'Size of everything at once', min: 0.4, max: 2.5, step: 0.01, dec: 2 },
+
+    { sec: 'contours', type: 'slider', key: 'layers', label: 'Contour layers',
+      sub: 'Rings grown out of each seed', min: 2, max: 48, step: 1, dec: 0 },
+    { sec: 'contours', type: 'slider', key: 'spacing', label: 'Contour spacing',
+      sub: 'Distance between neighbouring lines', min: 4, max: 40, step: 0.5, dec: 1 },
+    { sec: 'contours', type: 'slider', key: 'lineWidth', label: 'Line thickness',
+      min: 0.2, max: 4, step: 0.05, dec: 2 },
+
+    { sec: 'distortion', type: 'slider', key: 'distortion', label: 'Organic distortion',
+      sub: 'Bends the whole field', min: 0, max: 1, step: 0.01, dec: 2 },
+    { sec: 'distortion', type: 'slider', key: 'repulsion', label: 'Collision / repulsion',
+      sub: 'How hard systems push each other away', min: 0, max: 1, step: 0.01, dec: 2 },
+    { sec: 'distortion', type: 'slider', key: 'merge', label: 'Merge tendency',
+      sub: 'Chance two seeds fuse into one system', min: 0, max: 1, step: 0.01, dec: 2, relayout: true },
+
+    { sec: 'gaps', type: 'slider', key: 'gapProb', label: 'Line gap probability',
+      sub: 'Intentional breaks in the contours', min: 0, max: 0.9, step: 0.01, dec: 2 },
+    { sec: 'gaps', type: 'slider', key: 'secondary', label: 'Secondary seed chance',
+      sub: 'New small shapes born inside the gaps', min: 0, max: 1, step: 0.01, dec: 2, resecondary: true }
+  ];
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  function fmt(v, dec) {
+    return dec === 0 ? String(Math.round(v)) : Number(v).toFixed(dec);
+  }
+
+  /* --------------------------------------------------------------------- */
+  /* Build                                                                  */
+  /* --------------------------------------------------------------------- */
+
+  /*
+   * opts = {
+   *   body, tabsEl,
+   *   get(key), onParam(key, value, phase, meta),
+   *   flags, onFlag(key, value),
+   *   onExport(kind)
+   * }
+   */
+  function build(opts) {
+    var panels = {};
+    var widgets = {};
+    var tabButtons = {};
+
+    SECTIONS.forEach(function (sec, idx) {
+      var tab = el('button', 'tab', sec.label);
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-selected', idx === 0 ? 'true' : 'false');
+      tab.addEventListener('click', function () { activate(sec.id); });
+      opts.tabsEl.appendChild(tab);
+      tabButtons[sec.id] = tab;
+
+      var panel = el('div', 'panel' + (idx === 0 ? ' active' : ''));
+      panel.setAttribute('role', 'tabpanel');
+      opts.body.appendChild(panel);
+      panels[sec.id] = panel;
+    });
+
+    function activate(id) {
+      SECTIONS.forEach(function (s) {
+        panels[s.id].classList.toggle('active', s.id === id);
+        tabButtons[s.id].setAttribute('aria-selected', s.id === id ? 'true' : 'false');
+      });
+      opts.body.scrollTop = 0;
+    }
+
+    CONTROLS.forEach(function (c) {
+      var w = c.type === 'seg' ? makeSegment(c, opts) : makeSlider(c, opts);
+      panels[c.sec].appendChild(w.node);
+      widgets[c.key] = w;
+    });
+
+    var extras = buildExportPanel(panels['export'], opts);
+
+    return {
+      activate: activate,
+      /* Push current parameter values back into every widget. */
+      sync: function () {
+        CONTROLS.forEach(function (c) { widgets[c.key].set(opts.get(c.key)); });
+      },
+      /* The theme can also be changed from the More menu — keep the segmented
+         control in the panel in step with it. */
+      setTheme: function (v) { extras.theme.set(v); },
+      controls: CONTROLS
+    };
+  }
+
+  /* --------------------------------------------------------------------- */
+  /* Slider with tappable numeric field                                     */
+  /* --------------------------------------------------------------------- */
+
+  function makeSlider(c, opts) {
+    var node = el('div', 'ctl');
+    var head = el('div', 'ctl-head');
+
+    var lab = el('div');
+    var strong = el('span', 'ctl-label', c.label);
+    lab.appendChild(strong);
+    if (c.sub) lab.appendChild(el('span', 'ctl-sub', c.sub));
+
+    var val = el('button', 'ctl-val');
+    val.type = 'button';
+    val.setAttribute('aria-label', c.label + ' value, tap to type');
+
+    head.appendChild(lab);
+    head.appendChild(val);
+
+    var wrap = el('div', 'range-wrap');
+    var range = document.createElement('input');
+    range.type = 'range';
+    range.min = c.min;
+    range.max = c.max;
+    range.step = c.step;
+    range.setAttribute('aria-label', c.label);
+    wrap.appendChild(range);
+
+    node.appendChild(head);
+    node.appendChild(wrap);
+
+    function show(v) { val.textContent = fmt(v, c.dec); }
+
+    // dragging = cheap preview, release = full quality
+    range.addEventListener('input', function () {
+      var v = parseFloat(range.value);
+      show(v);
+      opts.onParam(c.key, v, 'preview', c);
+    });
+    var commit = function () {
+      opts.onParam(c.key, parseFloat(range.value), 'commit', c);
+    };
+    range.addEventListener('change', commit);
+    range.addEventListener('pointerup', commit);
+    range.addEventListener('keyup', commit);
+
+    /* Tapping the number swaps in a real input so exact values can be typed. */
+    val.addEventListener('click', function () {
+      var input = document.createElement('input');
+      input.type = 'number';
+      input.className = 'ctl-val';
+      input.value = range.value;
+      input.min = c.min; input.max = c.max; input.step = c.step;
+      input.inputMode = c.dec === 0 ? 'numeric' : 'decimal';
+      head.replaceChild(input, val);
+      input.focus();
+      input.select();
+      var done = function (apply) {
+        if (input.parentNode !== head) return;
+        if (apply) {
+          var v = parseFloat(input.value);
+          if (!isNaN(v)) {
+            v = Math.min(c.max, Math.max(c.min, v));
+            range.value = v;
+            show(v);
+            opts.onParam(c.key, parseFloat(range.value), 'commit', c);
+          }
+        }
+        head.replaceChild(val, input);
+      };
+      input.addEventListener('blur', function () { done(true); });
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); done(true); }
+        if (e.key === 'Escape') { e.preventDefault(); done(false); }
+      });
+    });
+
+    return {
+      node: node,
+      set: function (v) { range.value = v; show(parseFloat(range.value)); }
+    };
+  }
+
+  /* --------------------------------------------------------------------- */
+  /* Segmented control                                                      */
+  /* --------------------------------------------------------------------- */
+
+  function makeSegment(c, opts) {
+    var node = el('div', 'ctl');
+    var head = el('div', 'ctl-head');
+    head.appendChild(el('span', 'ctl-label', c.label));
+    node.appendChild(head);
+
+    var seg = el('div', 'seg');
+    var buttons = [];
+    c.options.forEach(function (o) {
+      var b = el('button', null, o[1]);
+      b.type = 'button';
+      b.setAttribute('aria-pressed', 'false');
+      b.addEventListener('click', function () {
+        buttons.forEach(function (x) { x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+        opts.onParam(c.key, o[0], 'commit', c);
+      });
+      seg.appendChild(b);
+      buttons.push(b);
+    });
+    node.appendChild(seg);
+
+    return {
+      node: node,
+      set: function (v) {
+        buttons.forEach(function (b, i) {
+          b.setAttribute('aria-pressed', c.options[i][0] === v ? 'true' : 'false');
+        });
+      }
+    };
+  }
+
+  /* --------------------------------------------------------------------- */
+  /* Export panel                                                           */
+  /* --------------------------------------------------------------------- */
+
+  function buildExportPanel(panel, opts) {
+    var stack = el('div', 'stack');
+
+    var row1 = el('div', 'row');
+    ['png', 'svg'].forEach(function (kind) {
+      var b = el('button', 'btn', kind === 'png' ? 'Download PNG' : 'Download SVG');
+      b.addEventListener('click', function () { opts.onExport(kind); });
+      row1.appendChild(b);
+    });
+    stack.appendChild(row1);
+
+    var row2 = el('div', 'row');
+    var share = el('button', 'btn', 'Share…');
+    share.addEventListener('click', function () { opts.onExport('share'); });
+    row2.appendChild(share);
+    if (!(navigator.share)) share.disabled = true;
+    stack.appendChild(row2);
+
+    stack.appendChild(el('div', 'section-title', 'Output options'));
+
+    var pngScale = makeSlider({
+      key: '_pngScale', label: 'PNG resolution', sub: 'Multiplier on the artboard size',
+      min: 1, max: 6, step: 0.5, dec: 1
+    }, {
+      get: function () { return opts.flags.pngScale; },
+      onParam: function (k, v) { opts.onFlag('pngScale', v); }
+    });
+    pngScale.set(opts.flags.pngScale);
+    stack.appendChild(pngScale.node);
+
+    /* A checkbox row plus its explanatory note. */
+    function toggleRow(key, label, note) {
+      var lbl = el('label', 'toggle');
+      var text = el('span');
+      text.appendChild(el('strong', null, label));
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!opts.flags[key];
+      cb.addEventListener('change', function () { opts.onFlag(key, cb.checked); });
+      lbl.appendChild(text);
+      lbl.appendChild(cb);
+      stack.appendChild(lbl);
+      if (note) stack.appendChild(el('p', 'note', note));
+      return cb;
+    }
+
+    toggleRow('background', 'Paper background',
+      'Off gives a transparent PNG and a background-free SVG');
+    toggleRow('plotter', 'Plotter mode',
+      'One uniform hairline weight for every path');
+    toggleRow('exportAsShown', 'Match screen colours',
+      'Off always exports dark lines on paper, whatever the theme — that is the ' +
+      'version you print, plot or cut.');
+
+    /* ---- screen-only display options --------------------------------- */
+    stack.appendChild(el('div', 'section-title', 'Display'));
+
+    var themeCtl = makeSegment({
+      key: 'theme', label: 'Theme',
+      options: [['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']]
+    }, {
+      onParam: function (k, v) { opts.onFlag('theme', v); }
+    });
+    themeCtl.set(opts.flags.theme);
+    stack.appendChild(themeCtl.node);
+    stack.appendChild(el('p', 'note', 'Auto follows your system setting.'));
+
+    toggleRow('invertArt', 'Invert the drawing in dark mode',
+      'Off keeps the paper white inside the dark interface — a true preview of ' +
+      'what you will print.');
+    toggleRow('showSeeds', 'Show seed handles',
+      'Handles are on-screen only — they never appear in an exported PNG or SVG.');
+
+    panel.appendChild(stack);
+    return { theme: themeCtl };
+  }
+
+  /* --------------------------------------------------------------------- */
+  /* Popovers                                                               */
+  /* --------------------------------------------------------------------- */
+
+  function openPopover(pop, anchor) {
+    pop.hidden = false;
+    var r = anchor.getBoundingClientRect();
+    var pr = pop.getBoundingClientRect();
+    var left = Math.min(window.innerWidth - pr.width - 8, Math.max(8, r.left));
+    var top = r.bottom + 6;
+    if (top + pr.height > window.innerHeight - 8) {
+      top = Math.max(8, r.top - pr.height - 6);
+    }
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+  }
+
+  var toastTimer = null;
+  function toast(msg, ms) {
+    var t = document.getElementById('toast');
+    t.textContent = msg;
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.hidden = true; }, ms || 2200);
+  }
+
+  GA.ui = {
+    build: build,
+    SECTIONS: SECTIONS,
+    CONTROLS: CONTROLS,
+    openPopover: openPopover,
+    toast: toast,
+    el: el
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* ---- js/app.js ---- */
+/*
+ * app.js — state, scheduling, input handling, persistence.
+ *
+ * Responsibilities
+ *   · owns the single source of truth (`state`) and the view transform
+ *   · schedules generation: preview while you drag, full quality when you stop
+ *   · pointer/touch gestures on the canvas
+ *   · undo stack, localStorage, URL hash, export, PWA registration
+ */
+(function (root) {
+  'use strict';
+  var GA = root.GA;
+
+  var STORE_KEY = 'contours.v1';
+  var BASE = 1200;          // long edge of the artboard, in art units
+  var MAX_UNDO = 24;
+
+  var canvas = document.getElementById('canvas');
+  var ctx = canvas.getContext('2d');
+  var stage = document.getElementById('stage');
+  var sheet = document.getElementById('sheet');
+  var scrim = document.getElementById('scrim');
+
+  var dpr = 1;
+  var cssW = 0, cssH = 0;
+
+  /* ---------------------------------------------------------------------- */
+  /* State                                                                   */
+  /* ---------------------------------------------------------------------- */
+
+  var state = {
+    seed: GA.randomSeed(),
+    params: Object.assign({}, GA.DEFAULTS),
+    seeds: [],
+    secondary: null,          // null = needs deriving
+    artW: BASE,
+    artH: BASE,
+    presetId: 'topographic'
+  };
+
+  var flags = {
+    pngScale: 2,
+    background: true,
+    plotter: false,
+    showSeeds: true,
+    theme: 'auto',          // auto | light | dark
+    invertArt: true,        // in dark mode, invert the drawing too
+    exportAsShown: false    // export using the on-screen colours
+  };
+
+  var view = { x: 0, y: 0, k: 1 };
+  var art = null;
+  var undoStack = [];
+  var userMovedView = false;
+
+  /* ---------------------------------------------------------------------- */
+  /* Theme                                                                   */
+  /* ---------------------------------------------------------------------- */
+
+  var darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+
+  function isDark() {
+    if (flags.theme === 'dark') return true;
+    if (flags.theme === 'light') return false;
+    return darkQuery.matches;
+  }
+
+  /*
+   * Screen colours for the drawing. In dark mode the artwork inverts too,
+   * unless the user has asked to keep the paper white — which is a genuine
+   * use case here, since it previews exactly what will be printed or cut.
+   */
+  function artColors() {
+    return (isDark() && flags.invertArt) ? GA.render.SCREEN_DARK : GA.render.PRINT;
+  }
+
+  /* Colours a PNG/SVG is written with. Printable by default. */
+  function exportColors() {
+    return flags.exportAsShown ? artColors() : GA.render.PRINT;
+  }
+
+  var pageColor = '#f3f1ec';
+  var frameColor = 'rgba(0,0,0,0.16)';
+
+  function applyTheme() {
+    var root = document.documentElement;
+    if (flags.theme === 'auto') root.removeAttribute('data-theme');
+    else root.setAttribute('data-theme', flags.theme);
+
+    // read the resolved tokens back out so the canvas matches the CSS exactly
+    var cs = getComputedStyle(root);
+    pageColor = cs.getPropertyValue('--ui-bg-2').trim() || '#f3f1ec';
+    frameColor = isDark() ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.16)';
+
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', cs.getPropertyValue('--ui-bg').trim());
+
+    draw();
+  }
+
+  // "Auto" has to follow the system if it changes while the app is open
+  var onSchemeChange = function () { if (flags.theme === 'auto') applyTheme(); };
+  if (darkQuery.addEventListener) darkQuery.addEventListener('change', onSchemeChange);
+  else if (darkQuery.addListener) darkQuery.addListener(onSchemeChange);
+
+  /* ---------------------------------------------------------------------- */
+  /* Canvas sizing                                                           */
+  /* ---------------------------------------------------------------------- */
+
+  function resize() {
+    var r = stage.getBoundingClientRect();
+    cssW = Math.max(1, Math.round(r.width));
+    cssH = Math.max(1, Math.round(r.height));
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    canvas.style.width = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+    if (!userMovedView) fitToScreen(false);
+    draw();
+  }
+
+  /* Artboard aspect follows the visible canvas area at generation time. */
+  function syncArtboard() {
+    var a = cssW / cssH;
+    if (a >= 1) { state.artW = BASE; state.artH = Math.round(BASE / a); }
+    else { state.artH = BASE; state.artW = Math.round(BASE * a); }
+  }
+
+  function fitToScreen(redraw) {
+    var k = Math.min(cssW / state.artW, cssH / state.artH) * 0.94;
+    view.k = k;
+    view.x = (cssW - state.artW * k) / 2;
+    view.y = (cssH - state.artH * k) / 2;
+    userMovedView = false;
+    if (redraw !== false) draw();
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* Drawing                                                                 */
+  /* ---------------------------------------------------------------------- */
+
+  var gestureCache = null, gestureView = null;
+
+  function draw() {
+    if (gestureCache) return drawGestureFrame();
+    if (!art) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = pageColor;
+      ctx.fillRect(0, 0, cssW, cssH);
+      return;
+    }
+    var col = artColors();
+    GA.render.draw(ctx, art, {
+      dpr: dpr, width: cssW, height: cssH, view: view,
+      pageColor: pageColor,
+      background: true,
+      paper: col.paper,
+      ink: col.ink,
+      frameColor: frameColor,
+      plotter: flags.plotter,
+      frame: true
+    });
+    if (flags.showSeeds) {
+      GA.render.drawSeeds(ctx, state.seeds, {
+        dpr: dpr, view: view, activeIndex: dragIndex,
+        paper: col.paper, ink: col.ink
+      });
+    }
+  }
+
+  /* While pinching/panning we transform the last rendered bitmap instead of
+     re-emitting every Bézier — this is what keeps gestures at 60fps. */
+  function beginGesture() {
+    if (!art) return;
+    gestureCache = document.createElement('canvas');
+    gestureCache.width = canvas.width;
+    gestureCache.height = canvas.height;
+    gestureCache.getContext('2d').drawImage(canvas, 0, 0);
+    gestureView = { x: view.x, y: view.y, k: view.k };
+  }
+
+  function drawGestureFrame() {
+    var s = view.k / gestureView.k;
+    var tx = view.x - gestureView.x * s;
+    var ty = view.y - gestureView.y * s;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = pageColor;
+    ctx.fillRect(0, 0, cssW, cssH);
+    ctx.setTransform(dpr * s, 0, 0, dpr * s, dpr * tx, dpr * ty);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(gestureCache, 0, 0, cssW, cssH);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function endGesture() {
+    gestureCache = null;
+    gestureView = null;
+    draw();
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* Generation scheduling                                                   */
+  /* ---------------------------------------------------------------------- */
+
+  var rafId = 0, pendingQuality = null, upgradeTimer = 0;
+
+  /* The most recent request wins, and everything is coalesced into one frame:
+     a burst of pointermove events costs a single generation, not twenty. */
+  function request(quality) {
+    pendingQuality = quality;
+    clearTimeout(upgradeTimer);
+    if (!rafId) rafId = requestAnimationFrame(run);
+  }
+
+  function run() {
+    rafId = 0;
+    var q = pendingQuality || 'full';
+    pendingQuality = null;
+    var t0 = performance.now();
+    try {
+      art = GA.generator.generate(state, q);
+    } catch (e) {
+      console.error(e);
+      GA.ui.toast('Generation failed — try a smaller value');
+      return;
+    }
+    draw();
+    status(q === 'preview'
+      ? 'preview…'
+      : art.paths.length + ' lines · ' + Math.round(performance.now() - t0) + 'ms');
+    if (q === 'preview') {
+      // if nothing else happens shortly, quietly upgrade to full quality
+      clearTimeout(upgradeTimer);
+      upgradeTimer = setTimeout(function () { request('full'); }, 260);
+    }
+    save();
+  }
+
+  var statusEl = document.getElementById('statusChip');
+  function status(msg) {
+    statusEl.textContent = msg;
+    statusEl.hidden = false;
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* Actions                                                                 */
+  /* ---------------------------------------------------------------------- */
+
+  function snapshot() {
+    return JSON.stringify({
+      seed: state.seed, params: state.params, seeds: state.seeds,
+      secondary: state.secondary, artW: state.artW, artH: state.artH,
+      presetId: state.presetId
+    });
+  }
+
+  function refreshUndoBtn() {
+    document.getElementById('btnUndoQuick').disabled = !undoStack.length;
+  }
+
+  function pushUndo() {
+    undoStack.push(snapshot());
+    if (undoStack.length > MAX_UNDO) undoStack.shift();
+    refreshUndoBtn();
+  }
+
+  function dropUndo() {          // interaction turned out to be a no-op
+    undoStack.pop();
+    refreshUndoBtn();
+  }
+
+  function undo() {
+    if (!undoStack.length) { GA.ui.toast('Nothing to undo'); return; }
+    var s = JSON.parse(undoStack.pop());
+    state.seed = s.seed;
+    state.params = s.params;
+    state.seeds = s.seeds;
+    state.secondary = s.secondary;
+    state.artW = s.artW;
+    state.artH = s.artH;
+    state.presetId = s.presetId;
+    refreshUndoBtn();
+    syncUI();
+    request('full');
+  }
+
+  function reseed() {
+    var rng = new GA.RNG(state.seed);
+    state.seeds = GA.generator.placeSeeds(rng, state.params, state.artW, state.artH);
+    state.secondary = null;
+  }
+
+  /* Generate = rebuild the composition deterministically from the current seed. */
+  function generate(newSeed) {
+    pushUndo();
+    if (newSeed) state.seed = GA.randomSeed();
+    syncArtboard();
+    reseed();
+    if (!userMovedView) fitToScreen(false);
+    updateSeedChip();
+    request('full');
+  }
+
+  function applyPreset(id) {
+    var p = GA.presetById(id);
+    if (!p) return;
+    pushUndo();
+    state.presetId = id;
+    Object.keys(p.params).forEach(function (k) { state.params[k] = p.params[k]; });
+    syncArtboard();
+    reseed();
+    syncUI();
+    request('full');
+    GA.ui.toast(p.name + ' — ' + p.note, 2600);
+  }
+
+  function resetAll() {
+    pushUndo();
+    state.params = Object.assign({}, GA.DEFAULTS);
+    state.presetId = 'topographic';
+    state.seed = GA.randomSeed();
+    syncArtboard();
+    reseed();
+    fitToScreen(false);
+    syncUI();
+    request('full');
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* Parameter plumbing                                                      */
+  /* ---------------------------------------------------------------------- */
+
+  // changing any of these makes the cached secondary seeds meaningless
+  var INVALIDATES_SECONDARY = {
+    shapes: 1, layout: 1, merge: 1, secondary: 1,
+    gapProb: 1, layers: 1, spacing: 1, scale: 1
+  };
+
+  var uiRef = null;
+
+  function onParam(key, value, phase, meta) {
+    if (state.params[key] === value && phase === 'preview') return;
+    if (phase === 'commit') pushUndoThrottled();
+    state.params[key] = value;
+    state.presetId = 'custom';
+    updatePresetChip();
+    if (meta && meta.relayout) reseed();
+    if (INVALIDATES_SECONDARY[key] && phase === 'commit') state.secondary = null;
+    request(phase === 'commit' ? 'full' : 'preview');
+  }
+
+  // one undo entry per continuous interaction, not per pixel of slider travel
+  var undoThrottle = 0;
+  function pushUndoThrottled() {
+    var now = Date.now();
+    if (now - undoThrottle > 900) { pushUndo(); }
+    undoThrottle = now;
+  }
+
+  function syncUI() {
+    if (uiRef) { uiRef.sync(); uiRef.setTheme(flags.theme); }
+    updateSeedChip();
+    updatePresetChip();
+  }
+
+  function updateSeedChip() {
+    document.getElementById('seedValue').textContent = String(state.seed);
+  }
+
+  function updatePresetChip() {
+    var p = GA.presetById(state.presetId);
+    document.getElementById('presetChip').textContent = p ? p.name : 'Custom';
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* Export                                                                  */
+  /* ---------------------------------------------------------------------- */
+
+  function fileBase() {
+    return 'contours-' + state.seed + '-' + (state.presetId || 'custom');
+  }
+
+  function exportSVG() {
+    var col = exportColors();
+    var svg = GA.exporters.toSVG(art, {
+      background: flags.background,
+      plotter: flags.plotter,
+      paper: col.paper,
+      ink: col.ink,
+      meta: { seed: state.seed, preset: state.presetId, params: state.params }
+    });
+    var blob = new Blob([svg], { type: 'image/svg+xml' });
+    GA.exporters.saveBlob(blob, fileBase() + '.svg').then(function () {
+      GA.ui.toast('SVG saved — real vector paths');
+    }, function (err) {
+      GA.ui.toast(GA.exporters.explainSaveError(err, 'svg'), 3600);
+    });
+  }
+
+  function exportPNG() {
+    var col = exportColors();
+    var c = GA.exporters.toCanvas(art, {
+      scale: flags.pngScale, background: flags.background, plotter: flags.plotter,
+      paper: col.paper, ink: col.ink
+    });
+    GA.exporters.canvasToBlob(c).then(function (blob) {
+      return GA.exporters.saveBlob(blob, fileBase() + '.png').then(function () {
+        GA.ui.toast('PNG saved (' + c.width + '×' + c.height + ')');
+      });
+    }).catch(function (err) {
+      GA.ui.toast(GA.exporters.explainSaveError(err, 'png'), 3600);
+    });
+  }
+
+  function shareArt() {
+    if (!navigator.share) { GA.ui.toast('Sharing is not available in this browser'); return; }
+    var col = exportColors();
+    var c = GA.exporters.toCanvas(art, {
+      scale: Math.min(flags.pngScale, 3), background: true, plotter: flags.plotter,
+      paper: col.paper, ink: col.ink
+    });
+    GA.exporters.canvasToBlob(c).then(function (blob) {
+      GA.exporters.shareFile(blob, fileBase() + '.png', 'Contour study — seed ' + state.seed)
+        .catch(function () {
+          return navigator.share({ title: 'Contours', text: 'Seed ' + state.seed, url: settingsURL() });
+        })
+        .catch(function () { GA.ui.toast('Sharing cancelled'); });
+    });
+  }
+
+  function settingsURL() {
+    var payload = { s: state.seed, p: state.presetId, v: state.params };
+    return location.origin + location.pathname + '#' + encodeURIComponent(JSON.stringify(payload));
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* Persistence                                                             */
+  /* ---------------------------------------------------------------------- */
+
+  var saveTimer = 0;
+  function saveNow() {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify({
+        seed: state.seed, params: state.params, seeds: state.seeds,
+        secondary: state.secondary, artW: state.artW, artH: state.artH,
+        presetId: state.presetId, flags: flags
+      }));
+    } catch (e) { /* private mode / quota — not fatal */ }
+  }
+  function save() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveNow, 250);
+  }
+  // mobile Safari can discard the page without warning — flush on the way out
+  window.addEventListener('pagehide', saveNow);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') saveNow();
+  });
+
+  function load() {
+    // a settings link always wins over stored state
+    if (location.hash.length > 2) {
+      try {
+        var h = JSON.parse(decodeURIComponent(location.hash.slice(1)));
+        if (h && h.v) {
+          state.seed = h.s | 0;
+          state.presetId = h.p || 'custom';
+          Object.keys(GA.DEFAULTS).forEach(function (k) {
+            if (h.v[k] !== undefined) state.params[k] = h.v[k];
+          });
+          return 'hash';
+        }
+      } catch (e) { /* malformed link, fall through */ }
+    }
+    try {
+      var raw = localStorage.getItem(STORE_KEY);
+      if (!raw) return false;
+      var s = JSON.parse(raw);
+      if (!s || !s.params) return false;
+      state.seed = s.seed;
+      Object.keys(GA.DEFAULTS).forEach(function (k) {
+        if (s.params[k] !== undefined) state.params[k] = s.params[k];
+      });
+      state.seeds = s.seeds || [];
+      state.secondary = s.secondary || null;
+      state.artW = s.artW || BASE;
+      state.artH = s.artH || BASE;
+      state.presetId = s.presetId || 'custom';
+      if (s.flags) Object.keys(flags).forEach(function (k) {
+        if (s.flags[k] !== undefined) flags[k] = s.flags[k];
+      });
+      return state.seeds.length ? 'store' : false;
+    } catch (e) { return false; }
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* Canvas interaction                                                      */
+  /* ---------------------------------------------------------------------- */
+
+  var pointers = new Map();
+  var dragIndex = -1;
+  var pressStart = null;
+  var longPressTimer = 0;
+  var moved = false;
+  var panning = false;
+  var pinch = null;
+
+  function toWorld(cx, cy) {
+    return { x: (cx - view.x) / view.k, y: (cy - view.y) / view.k };
+  }
+
+  function localPoint(e) {
+    var r = canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  function hitSeed(px, py) {
+    var best = -1, bestD = 26; // screen px
+    for (var i = 0; i < state.seeds.length; i++) {
+      var s = state.seeds[i];
+      var d = Math.hypot(s.x * view.k + view.x - px, s.y * view.k + view.y - py);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+  }
+
+  function nearestSeed(px, py) {
+    var best = -1, bestD = Infinity;
+    for (var i = 0; i < state.seeds.length; i++) {
+      var s = state.seeds[i];
+      var d = Math.hypot(s.x * view.k + view.x - px, s.y * view.k + view.y - py);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return { index: best, dist: bestD };
+  }
+
+  function addSeedAt(wx, wy) {
+    pushUndo();
+    var pool = [];
+    state.seeds.forEach(function (s) { if (pool.indexOf(s.group) === -1) pool.push(s.group); });
+    var rng = new GA.RNG((state.seed ^ (state.seeds.length * 2654435761) ^ (Date.now() & 0xffff)) | 0);
+    state.seeds.push(GA.generator.makeSeed(rng, wx, wy, state.params, pool));
+    state.secondary = null;
+    request('full');
+  }
+
+  function removeSeed(i) {
+    if (i < 0 || i >= state.seeds.length) return;
+    if (state.seeds.length <= 1) { GA.ui.toast('Keep at least one seed'); return; }
+    pushUndo();
+    state.seeds.splice(i, 1);
+    state.secondary = null;
+    request('full');
+  }
+
+  canvas.addEventListener('pointerdown', function (e) {
+    canvas.setPointerCapture(e.pointerId);
+    var p = localPoint(e);
+    pointers.set(e.pointerId, p);
+
+    if (pointers.size === 2) {
+      // second finger down — switch to pinch/pan, cancel any seed interaction
+      clearTimeout(longPressTimer);
+      dragIndex = -1;
+      panning = false;
+      var pts = Array.from(pointers.values());
+      pinch = {
+        d: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y),
+        cx: (pts[0].x + pts[1].x) / 2,
+        cy: (pts[0].y + pts[1].y) / 2,
+        k: view.k, vx: view.x, vy: view.y
+      };
+      beginGesture();
+      return;
+    }
+    if (pointers.size > 2) return;
+
+    moved = false;
+    pressStart = p;
+
+    var hit = hitSeed(p.x, p.y);
+    if (e.shiftKey && e.pointerType === 'mouse') {
+      var n = nearestSeed(p.x, p.y);
+      if (n.index >= 0 && n.dist < 140) removeSeed(n.index);
+      pressStart = null;
+      return;
+    }
+    if (hit >= 0) {
+      dragIndex = hit;
+      pushUndo();
+      // long press on a seed removes it
+      longPressTimer = setTimeout(function () {
+        if (!moved && dragIndex >= 0) {
+          var i = dragIndex;
+          dragIndex = -1;
+          dropUndo();                    // the drag snapshot is redundant here
+          removeSeed(i);
+          if (navigator.vibrate) navigator.vibrate(12);
+          GA.ui.toast('Seed removed');
+        }
+      }, 520);
+      draw();
+    } else {
+      panning = true;
+      beginGesture();
+    }
+  });
+
+  canvas.addEventListener('pointermove', function (e) {
+    if (!pointers.has(e.pointerId)) return;
+    var p = localPoint(e);
+    pointers.set(e.pointerId, p);
+
+    if (pinch && pointers.size >= 2) {
+      var pts = Array.from(pointers.values());
+      var d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      var cx = (pts[0].x + pts[1].x) / 2;
+      var cy = (pts[0].y + pts[1].y) / 2;
+      var s = Math.max(0.05, Math.min(40, d / Math.max(1, pinch.d)));
+      view.k = pinch.k * s;
+      // keep the pinch midpoint anchored, and follow two-finger dragging
+      view.x = cx - (pinch.cx - pinch.vx) * s;
+      view.y = cy - (pinch.cy - pinch.vy) * s;
+      userMovedView = true;
+      draw();
+      return;
+    }
+
+    if (pressStart && Math.hypot(p.x - pressStart.x, p.y - pressStart.y) > 7) {
+      moved = true;
+      clearTimeout(longPressTimer);
+    }
+
+    if (dragIndex >= 0 && moved) {
+      var w = toWorld(p.x, p.y);
+      state.seeds[dragIndex].x = w.x;
+      state.seeds[dragIndex].y = w.y;
+      request('preview');
+      return;
+    }
+
+    if (panning && moved) {
+      view.x += p.x - pressStart.x;
+      view.y += p.y - pressStart.y;
+      pressStart = p;
+      userMovedView = true;
+      draw();
+    }
+  });
+
+  function endPointer(e) {
+    if (!pointers.has(e.pointerId)) return;
+    var p = pointers.get(e.pointerId);
+    pointers.delete(e.pointerId);
+    clearTimeout(longPressTimer);
+
+    if (pinch) {
+      if (pointers.size < 2) { pinch = null; endGesture(); }
+      pressStart = null;
+      dragIndex = -1;
+      panning = false;
+      return;
+    }
+
+    if (dragIndex >= 0) {
+      if (moved) request('full'); else dropUndo();
+      dragIndex = -1;
+      draw();
+      pressStart = null;
+      return;
+    }
+
+    if (panning) {
+      panning = false;
+      endGesture();
+      if (!moved && pressStart) {
+        var w = toWorld(p.x, p.y);
+        if (w.x > -40 && w.y > -40 && w.x < state.artW + 40 && w.y < state.artH + 40) {
+          addSeedAt(w.x, w.y);
+        }
+      }
+    }
+    pressStart = null;
+  }
+
+  canvas.addEventListener('pointerup', endPointer);
+  canvas.addEventListener('pointercancel', endPointer);
+
+  canvas.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    var p = localPoint(e);
+    var f = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0016));
+    var k2 = Math.max(0.05, Math.min(40, view.k * f));
+    view.x = p.x - (p.x - view.x) * (k2 / view.k);
+    view.y = p.y - (p.y - view.y) * (k2 / view.k);
+    view.k = k2;
+    userMovedView = true;
+    draw();
+  }, { passive: false });
+
+  // iOS Safari page-level pinch zoom
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach(function (t) {
+    document.addEventListener(t, function (e) { e.preventDefault(); }, { passive: false });
+  });
+  document.addEventListener('dblclick', function (e) { e.preventDefault(); });
+
+  /* ---------------------------------------------------------------------- */
+  /* Chrome wiring                                                           */
+  /* ---------------------------------------------------------------------- */
+
+  var wideQuery = window.matchMedia('(min-width: 760px), (orientation: landscape) and (min-width: 620px)');
+  function isWide() { return wideQuery.matches; }
+
+  function openSheet(open) {
+    if (isWide()) {
+      sheet.classList.toggle('collapsed', !open);
+      return;
+    }
+    sheet.classList.toggle('open', open);
+    document.body.classList.toggle('sheet-open', open);
+    scrim.hidden = !open;
+    document.getElementById('btnSettings').setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  document.getElementById('btnSettings').addEventListener('click', function () {
+    openSheet(!sheet.classList.contains('open'));
+  });
+  document.getElementById('sheetHandle').addEventListener('click', function () { openSheet(false); });
+  scrim.addEventListener('click', function () { openSheet(false); closeMenus(); });
+
+  document.getElementById('btnGenerate').addEventListener('click', function () { generate(false); });
+  document.getElementById('btnRandom').addEventListener('click', function () { generate(true); });
+  document.getElementById('btnFit').addEventListener('click', function () { fitToScreen(); });
+  document.getElementById('btnUndoQuick').addEventListener('click', undo);
+
+  /* popovers -------------------------------------------------------------- */
+
+  var presetMenu = document.getElementById('presetMenu');
+  var moreMenu = document.getElementById('moreMenu');
+
+  GA.PRESETS.forEach(function (p) {
+    var b = GA.ui.el('button', 'preset-item');
+    b.appendChild(GA.ui.el('strong', null, p.name));
+    b.appendChild(GA.ui.el('small', null, p.note));
+    b.addEventListener('click', function () { closeMenus(); applyPreset(p.id); });
+    b.dataset.preset = p.id;
+    presetMenu.appendChild(b);
+  });
+
+  function closeMenus() {
+    presetMenu.hidden = true;
+    moreMenu.hidden = true;
+    document.getElementById('btnPresets').setAttribute('aria-expanded', 'false');
+    document.getElementById('btnMore').setAttribute('aria-expanded', 'false');
+  }
+
+  function toggleMenu(menu, btn) {
+    var wasOpen = !menu.hidden;
+    closeMenus();
+    if (wasOpen) return;
+    document.getElementById('miTheme').textContent =
+      isDark() ? 'Switch to light mode' : 'Switch to dark mode';
+    Array.prototype.forEach.call(presetMenu.children, function (c) {
+      c.setAttribute('aria-current', c.dataset.preset === state.presetId ? 'true' : 'false');
+    });
+    GA.ui.openPopover(menu, btn);
+    btn.setAttribute('aria-expanded', 'true');
+  }
+
+  document.getElementById('btnPresets').addEventListener('click', function (e) {
+    e.stopPropagation();
+    toggleMenu(presetMenu, e.currentTarget);
+  });
+  document.getElementById('btnMore').addEventListener('click', function (e) {
+    e.stopPropagation();
+    toggleMenu(moreMenu, e.currentTarget);
+  });
+  document.addEventListener('pointerdown', function (e) {
+    if (!presetMenu.hidden && !presetMenu.contains(e.target)) closeMenus();
+    else if (!moreMenu.hidden && !moreMenu.contains(e.target)) closeMenus();
+  }, true);
+
+  moreMenu.addEventListener('click', function (e) {
+    var act = e.target.dataset && e.target.dataset.act;
+    if (!act) return;
+    closeMenus();
+    if (act === 'undo') undo();
+    else if (act === 'reset') resetAll();
+    else if (act === 'fit') fitToScreen();
+    else if (act === 'theme') toggleTheme();
+    else if (act === 'png') exportPNG();
+    else if (act === 'svg') exportSVG();
+    else if (act === 'share') shareArt();
+    else if (act === 'fullscreen') toggleFullscreen();
+    else if (act === 'seedcopy') copySettings();
+  });
+
+  /* From the More menu: flip to the opposite of what is showing, and make it
+     an explicit choice rather than leaving it on Auto. */
+  function toggleTheme() {
+    flags.theme = isDark() ? 'light' : 'dark';
+    applyTheme();
+    if (uiRef) uiRef.setTheme(flags.theme);
+    save();
+  }
+
+  /* Fullscreen is refused outright on iPhone Safari and inside a sandboxed
+     iframe, so every path here has to degrade to a message rather than an
+     unhandled rejection. */
+  function toggleFullscreen() {
+    var d = document.documentElement;
+    var noFS = function () {
+      GA.ui.toast('Fullscreen is not available here — on iOS use Share → Add to Home Screen');
+    };
+    try {
+      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        var req = d.requestFullscreen || d.webkitRequestFullscreen;
+        if (!req) return noFS();
+        var r = req.call(d);
+        if (r && r.catch) r.catch(noFS);
+      } else {
+        var exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (exit) {
+          var e = exit.call(document);
+          if (e && e.catch) e.catch(function () {});
+        }
+      }
+    } catch (err) {
+      noFS();
+    }
+  }
+
+  function copySettings() {
+    var url = settingsURL();
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(url).then(function () {
+        GA.ui.toast('Settings link copied');
+      }, function () { GA.ui.toast('Could not copy'); });
+    } else {
+      GA.ui.toast('Clipboard unavailable');
+    }
+  }
+
+  /* seed chip — tap to type an exact seed ---------------------------------- */
+
+  document.getElementById('seedChip').addEventListener('click', function () {
+    var chip = document.getElementById('seedChip');
+    if (chip.querySelector('input')) return;
+    var input = document.createElement('input');
+    input.type = 'number';
+    input.className = 'ctl-val';
+    input.style.width = '110px';
+    input.value = state.seed;
+    var old = chip.innerHTML;
+    chip.innerHTML = '';
+    chip.appendChild(input);
+    input.focus();
+    input.select();
+    var finish = function (apply) {
+      var v = parseInt(input.value, 10);
+      chip.innerHTML = old;
+      updateSeedChip();
+      if (apply && !isNaN(v)) {
+        pushUndo();
+        state.seed = v | 0;
+        reseed();
+        updateSeedChip();
+        request('full');
+      }
+    };
+    input.addEventListener('blur', function () { finish(true); });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+  });
+
+  /* keyboard shortcuts (desktop) ------------------------------------------ */
+
+  document.addEventListener('keydown', function (e) {
+    if (e.target.tagName === 'INPUT') return;
+    if (e.key === 'g') generate(false);
+    else if (e.key === 'r') generate(true);
+    else if (e.key === 'f') fitToScreen();
+    else if (e.key === 'z' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); undo(); }
+  });
+
+  /* ---------------------------------------------------------------------- */
+  /* Boot                                                                    */
+  /* ---------------------------------------------------------------------- */
+
+  uiRef = GA.ui.build({
+    body: document.getElementById('sheetBody'),
+    tabsEl: document.getElementById('tabs'),
+    get: function (k) { return state.params[k]; },
+    onParam: onParam,
+    flags: flags,
+    onFlag: function (k, v) {
+      flags[k] = v;
+      if (k === 'theme') applyTheme();
+      else if (k === 'plotter' || k === 'showSeeds' || k === 'invertArt') draw();
+      save();
+    },
+    onExport: function (kind) {
+      if (kind === 'png') exportPNG();
+      else if (kind === 'svg') exportSVG();
+      else shareArt();
+    }
+  });
+
+  var restored = load();
+  applyTheme();
+  resize();
+  // a restored drawing keeps the artboard it was made on, otherwise the stored
+  // seed positions would no longer match the composition
+  if (!restored || !state.seeds.length) {
+    syncArtboard();
+    reseed();
+  }
+  GA.generator.resolveSeeds(state.seeds, state.params);
+  fitToScreen(false);
+  syncUI();
+  request('full');
+  if (isWide()) sheet.classList.remove('collapsed');
+
+  window.addEventListener('resize', function () {
+    clearTimeout(window.__rz);
+    window.__rz = setTimeout(resize, 120);
+  });
+  window.addEventListener('orientationchange', function () {
+    userMovedView = false;
+    setTimeout(resize, 220);
+  });
+
+  // first-run hint
+  if (!localStorage.getItem(STORE_KEY + '.seen')) {
+    var hint = document.getElementById('hint');
+    setTimeout(function () { hint.classList.add('show'); }, 700);
+    setTimeout(function () { hint.classList.remove('show'); }, 5200);
+    try { localStorage.setItem(STORE_KEY + '.seen', '1'); } catch (e) {}
+  }
+
+  // PWA — only meaningful over http(s); opening index.html from disk still works
+  if ('serviceWorker' in navigator &&
+      (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function () {});
+    });
+  }
+
+  root.CONTOURS = {
+    state: state, view: view, flags: flags,
+    draw: draw, request: request,
+    setTheme: function (v) { flags.theme = v; applyTheme(); if (uiRef) uiRef.setTheme(v); save(); },
+    setFlag: function (k, v) { flags[k] = v; if (k === 'theme') applyTheme(); else draw(); save(); },
+    get art() { return art; }
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+</body>
+</html>
