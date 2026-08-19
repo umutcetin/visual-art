@@ -1,1 +1,224 @@
-# visual-art
+# Contours
+
+A single-page generative art tool for imaginary topographic maps and organic
+architectural drawings. No frameworks, no backend, no external APIs — open
+`index.html` in a browser and it runs.
+
+Monochrome by default: off-white paper, charcoal lines, no gradients, so the
+output is ready to plot, print, laser-cut or emboss.
+
+```
+index.html            markup shell
+styles.css            interface styles (mobile first)
+js/rng.js             seeded PRNG — the whole drawing is reproducible
+js/noise.js           Perlin noise + fBm
+js/edt.js             exact Euclidean distance transform
+js/field.js           builds the scalar field the contours are sliced from
+js/contour.js         marching squares + polyline stitching
+js/geom.js            resampling, smoothing, gaps, Catmull-Rom → Bézier
+js/presets.js         defaults and the four named looks
+js/generator.js       seed placement and the generation pass
+js/render.js          canvas drawing
+js/exporters.js       PNG / SVG / Web Share
+js/ui.js              controls
+js/app.js             state, gestures, undo, persistence
+sw.js                 offline cache (PWA)
+```
+
+---
+
+## 1. How the generation algorithm works
+
+The whole drawing comes out of one idea: **don't grow curves, slice a field.**
+
+If you try to grow each contour by pushing the previous one outward along its
+normals, the curves self-intersect at concave corners, they develop kinks, and
+two systems meeting each other is a special case you have to code by hand.
+Instead the generator builds a scalar height field once and then extracts its
+level sets. Every level set is automatically a perfect offset curve: smooth,
+non self-intersecting, everywhere the same distance from its neighbour, and
+merging or splitting for free.
+
+**Step 1 — seeds.** 4–8 small closed organic curves are placed on the sheet.
+Each one is a radial function `r(θ)` made of two or three low harmonics
+(a soft biomorphic blob), optionally blended toward a regular polygon by the
+*Geometry* slider. Placement uses one of three strategies — best-candidate
+scatter with a randomly placed void region, a jittered lattice, or loose
+clusters — all of which deliberately leave one large empty area so the finished
+sheet keeps its negative space.
+
+Every seed is also given a **group id**. A new seed either joins an existing
+group or starts its own, with probability set by *Merge tendency*. That single
+number is what decides who fuses with whom.
+
+**Step 2 — the distance field.** The seeds are rasterised into a coarse grid,
+and an exact Euclidean distance transform (Felzenszwalb–Huttenlocher, linear
+time) gives the signed distance from every grid cell to the nearest seed
+outline. Cost is independent of how many seeds there are — three passes over
+the grid total, which is why it stays interactive on a phone.
+
+**Step 3 — soft merging.** A true distance union has a crease where two shapes
+meet. A small blur of the field rounds that crease into the smooth waisted
+"peanut" join you see in real contour maps.
+
+**Step 4 — repulsion.** The distance transform also reports which seed each
+cell belongs to, which is a Voronoi diagram for free. Wherever two *different
+groups* touch, a smooth ridge is added to the field. Contours climbing toward
+that ridge get pushed back, so instead of crossing they flatten, run parallel
+for a while and flow around one another, leaving the channel between systems.
+Same-group neighbours have no ridge, so they merge into one larger organic
+shape. *Collision / repulsion* scales the ridge height.
+
+**Step 5 — organic distortion.** The field is sampled through a domain warp
+driven by fBm noise, with a deliberately long wavelength — about twenty line
+spacings. Short-wavelength warping reads as noise or glitch; long wavelength
+pulls whole systems into lobed, flowing shapes while each line stays locally
+parallel to its neighbour. A second, much finer noise term is added to the
+field value itself, so the spacing is never mechanically even.
+
+**Step 6 — extraction.** Marching squares slices the field at `0, s, 2s, 3s…`.
+Crossing points are keyed on grid *edge indices* rather than coordinates, so
+chains stitch together exactly with no epsilon matching, and saddle cells are
+disambiguated by the cell-centre average so no contour ever crosses itself.
+Each chain is then resampled to even arc length, Laplacian-smoothed, thinned,
+and converted to cubic Béziers via Catmull-Rom.
+
+**Step 7 — gaps and secondary seeds.** Walking each contour by arc length, a
+gap is occasionally opened. The midpoints of those gaps are collected, and some
+of them become new small seeds; the field is then rebuilt with them included,
+so the little shapes genuinely interact with the contours around them rather
+than being drawn on top.
+
+The same path list feeds the canvas renderer and the SVG writer, which is why
+the SVG contains real `M … C …` geometry and never an embedded bitmap.
+
+---
+
+## 2. Which parameters produce the most interesting results
+
+**The three that matter most**
+
+- **Merge tendency ↔ Collision / repulsion.** These two are the personality of
+  the piece. High merge + low repulsion gives one continuous landmass with
+  nested peaks. Low merge + high repulsion gives separate islands with clean
+  channels between them and a much more architectural, site-plan feel. The best
+  results usually sit at an extreme of one and near zero on the other — a
+  middling setting of both tends to look undecided.
+- **Organic distortion around 0.5–0.7.** Below ~0.2 the forms stay close to
+  concentric circles. Above ~0.8 the field folds hard enough that contours start
+  breaking into short fragments — sometimes beautiful, often mush. The 0.5–0.7
+  band is where you get lobed, flowing shapes that still read as a coherent map.
+- **Layers × Spacing** is the real density control, and it is the one thing that
+  makes or breaks the composition. Their product is how far each system reaches.
+  Keep it near a third of the short edge of the sheet and you get large negative
+  space; push it past two thirds and everything merges into one grey mass.
+
+**Combinations worth trying**
+
+- *Ruins* with **Gap probability above 0.4** and **Layers below 8** — sparse
+  fragments that read as an excavation plan.
+- *Tile* with **Geometry above 0.7** and **Repulsion around 0.6** — the polygon
+  faces survive out to the outer rings and the channels between motifs act like
+  grout lines.
+- **Secondary seeds near 1.0 with a moderate gap probability** — small islands
+  keep appearing inside the breaks, which is where most of the "someone drew
+  this" quality comes from.
+- **Overall scale near 2.0 with few shapes** — a single huge form cropped by the
+  page edge, which often beats a tidy full composition.
+
+**Reproducing a drawing.** The seed number is shown top-left and is tappable —
+type a number to go straight back to a drawing. *More → Copy settings link*
+puts the seed and every parameter into the URL. Everything is also stored in
+`localStorage`, so a refresh keeps exactly what was on screen, including seeds
+you added or moved by hand.
+
+---
+
+## 3. Adapting the output for fabrication
+
+Everything below is a small edit; the geometry is already vector and already
+closed where it can be.
+
+### Pen plotting (AxiDraw, iDraw, HP-GL)
+
+Turn on **Plotter mode** in the Export tab before saving the SVG. Every path is
+written into a single `<g stroke-width="1">` with no width variation, which is
+what plotter software expects.
+
+Two further tweaks in the code:
+
+- **Fewer pen lifts.** In `js/generator.js`, drop *Gap probability* to 0 so each
+  contour stays a single continuous path.
+- **Real units.** In `js/exporters.js`, `toSVG` writes `width="1200"`. Change it
+  to millimetres for a fixed paper size:
+  ```js
+  out.push('<svg xmlns="http://www.w3.org/2000/svg" version="1.1" ' +
+    'width="210mm" height="297mm" viewBox="0 0 ' + W + ' ' + H + '">');
+  ```
+  The viewBox stays in art units, so the drawing scales to the sheet.
+
+### Laser cutting
+
+Cutters want **closed** paths and a hairline stroke.
+
+- Set *Gap probability* to 0 — an open path cuts as a slit and drops nothing out.
+- In `js/generator.js`, keep only closed contours by skipping open chains:
+  ```js
+  if (!ch.closed) continue;   // in the extraction loop
+  ```
+  Open chains are the ones that ran off the edge of the sheet, so this also
+  crops the design cleanly to the artboard.
+- In `js/exporters.js`, set the stroke to the cutter's convention (usually
+  `stroke="#f00"` at `stroke-width="0.01"`) and turn the paper background off.
+- For cut-and-drop pieces rather than score lines, raise *Contour spacing* so
+  the remaining material between rings is wider than your kerf — around 3 mm of
+  physical spacing is a safe starting point.
+
+### 3D relief / CNC
+
+The height field is already there — the contours are its level sets — so the
+cleanest route is to export the field rather than the lines.
+
+In `js/field.js`, `buildField` returns a `Float32Array` of signed distances. Add
+a function that maps it to a heightmap image:
+
+```js
+GA.exportHeightmap = function (F, grid, maxLevel) {
+  var c = document.createElement('canvas');
+  c.width = grid.gw; c.height = grid.gh;
+  var img = c.getContext('2d').createImageData(grid.gw, grid.gh);
+  for (var i = 0; i < F.length; i++) {
+    // near a seed = tall, far = flat ground
+    var h = 1 - Math.min(1, Math.max(0, F[i] / maxLevel));
+    var v = Math.round(h * 255);
+    img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v;
+    img.data[i * 4 + 3] = 255;
+  }
+  c.getContext('2d').putImageData(img, 0, 0);
+  return c;
+};
+```
+
+That 16-bit-ish greyscale drops straight into Blender's displace modifier or a
+CAM package. Raise `QUALITY.full.res` in `js/generator.js` to 700 or so first —
+it costs a second but gives a much finer relief.
+
+For **stepped**, terrace-like relief instead of a smooth slope — the laser-cut
+stacked-plywood look — quantise the same value:
+
+```js
+var steps = 12;
+var h = Math.floor((1 - F[i] / maxLevel) * steps) / steps;
+```
+
+Each terrace then corresponds exactly to one contour line in the SVG, so the
+plotted drawing and the physical relief are the same object.
+
+---
+
+## Installing as an app
+
+Served over HTTPS (or `localhost`) the service worker caches everything and the
+tool works offline; on iOS use *Share → Add to Home Screen* for fullscreen
+standalone mode. Opening `index.html` straight from disk works too — the service
+worker simply does not register, which changes nothing else.

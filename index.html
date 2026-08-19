@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#faf8f4">
+<meta name="description" content="Generative contour drawings — an offline tool for topographic, biomorphic and architectural line art.">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Contours">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="styles.css">
+<title>Contours — generative topographic drawings</title>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ── top bar: essential actions only ───────────────────────────── -->
+  <header id="topbar">
+    <button id="btnGenerate" class="btn btn-primary">Generate</button>
+    <button id="btnRandom" class="btn">Random</button>
+    <button id="btnPresets" class="btn" aria-haspopup="true" aria-expanded="false">Presets</button>
+    <button id="btnSettings" class="btn" aria-expanded="false">Settings</button>
+    <button id="btnMore" class="btn btn-more" aria-haspopup="true" aria-expanded="false">More</button>
+  </header>
+
+  <!-- ── canvas stage ──────────────────────────────────────────────── -->
+  <main id="stage">
+    <canvas id="canvas"></canvas>
+
+    <div id="overlayTop" class="overlay overlay-top">
+      <button id="seedChip" class="chip" title="Tap to type a seed">
+        <span class="chip-key">seed</span><span id="seedValue" class="chip-val">—</span>
+      </button>
+      <span id="presetChip" class="chip chip-quiet">Topographic</span>
+    </div>
+
+    <div id="overlayBottom" class="overlay overlay-bottom">
+      <button id="btnFit" class="chip chip-action">Fit to screen</button>
+      <button id="btnUndoQuick" class="chip chip-action" disabled>Undo</button>
+      <span id="statusChip" class="chip chip-quiet" hidden></span>
+    </div>
+
+    <div id="hint" class="hint">Tap to add a seed · drag to move · long-press to remove</div>
+  </main>
+
+  <!-- ── controls: bottom sheet on phones, side panel when wide ────── -->
+  <section id="sheet" class="sheet" aria-label="Settings">
+    <button id="sheetHandle" class="sheet-handle" aria-label="Collapse settings"><span></span></button>
+    <nav id="tabs" class="tabs" role="tablist"></nav>
+    <div id="sheetBody" class="sheet-body"></div>
+  </section>
+
+  <div id="scrim" class="scrim" hidden></div>
+
+  <!-- ── popovers ──────────────────────────────────────────────────── -->
+  <div id="presetMenu" class="popover" hidden role="menu" aria-label="Presets"></div>
+  <div id="moreMenu" class="popover" hidden role="menu" aria-label="More actions">
+    <button class="menu-item" data-act="undo">Undo last generation</button>
+    <button class="menu-item" data-act="reset">Reset everything</button>
+    <button class="menu-item" data-act="fit">Fit to screen</button>
+    <button class="menu-item" data-act="png">Download PNG</button>
+    <button class="menu-item" data-act="svg">Download SVG</button>
+    <button class="menu-item" data-act="share">Share…</button>
+    <button class="menu-item" data-act="fullscreen">Fullscreen</button>
+    <button class="menu-item" data-act="seedcopy">Copy settings link</button>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+</div>
+
+<script src="js/rng.js"></script>
+<script src="js/noise.js"></script>
+<script src="js/edt.js"></script>
+<script src="js/field.js"></script>
+<script src="js/contour.js"></script>
+<script src="js/geom.js"></script>
+<script src="js/presets.js"></script>
+<script src="js/generator.js"></script>
+<script src="js/render.js"></script>
+<script src="js/exporters.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

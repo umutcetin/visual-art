@@ -1,0 +1,488 @@
+/* ==========================================================================
+   Contours — interface styles
+   Mobile first. Phone portrait is the base case; wider viewports move the
+   controls from a bottom sheet into a fixed side panel.
+   ========================================================================== */
+
+:root {
+  --paper: #faf8f4;
+  --ink: #16161a;
+  --ui-bg: #ffffff;
+  --ui-bg-2: #f3f1ec;
+  --ui-line: #e0ddd5;
+  --ui-line-strong: #cdc9bf;
+  --ui-dim: #6f6b62;
+  --radius: 12px;
+  --tap: 44px;                       /* minimum touch target */
+  --topbar-h: 56px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --sheet-h: 46vh;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;                  /* no page scrolling, ever */
+  overscroll-behavior: none;
+  background: var(--ui-bg-2);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body { position: fixed; inset: 0; width: 100%; }
+
+button, input, select { font-family: inherit; font-size: inherit; color: inherit; }
+button { touch-action: manipulation; }
+
+/* ── app shell ─────────────────────────────────────────────────────────── */
+
+#app {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  /* minmax(0,1fr) — without it the side panel's content sets a minimum height
+     and pushes the canvas row past the bottom of the screen */
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* ── top bar ───────────────────────────────────────────────────────────── */
+
+#topbar {
+  grid-row: 1;
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  padding: 6px calc(8px + var(--safe-r)) 6px calc(8px + var(--safe-l));
+  padding-top: calc(6px + var(--safe-t));
+  background: var(--ui-bg);
+  border-bottom: 1px solid var(--ui-line);
+  z-index: 30;
+}
+
+/* Buttons share the bar evenly and shrink their padding before their height,
+   so every target stays at least 44px tall even on a 320px phone. */
+#topbar .btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 6px;
+  font-size: clamp(12.5px, 3.4vw, 15px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#topbar .btn-more { flex: 0 1 auto; }
+
+.btn {
+  flex: 0 0 auto;
+  min-height: var(--tap);
+  padding: 0 14px;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: 10px;
+  background: var(--ui-bg);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  cursor: pointer;
+  transition: background .12s ease, border-color .12s ease;
+}
+.btn:active { background: var(--ui-bg-2); }
+.btn[aria-expanded="true"] { background: var(--ui-bg-2); border-color: var(--ink); }
+.btn-primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.btn-primary:active { background: #33333a; }
+
+/* ── canvas stage ──────────────────────────────────────────────────────── */
+
+#stage {
+  grid-row: 2;
+  position: relative;
+  overflow: hidden;
+  background: var(--ui-bg-2);
+  min-height: 0;
+}
+
+#canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;                /* we handle all gestures ourselves */
+  cursor: crosshair;
+}
+
+.overlay {
+  position: absolute;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  pointer-events: none;
+  z-index: 10;
+}
+.overlay > * { pointer-events: auto; }
+.overlay-top { top: 8px; left: calc(8px + var(--safe-l)); right: 8px; }
+.overlay-bottom {
+  bottom: 8px;
+  left: calc(8px + var(--safe-l));
+  right: 8px;
+  flex-wrap: wrap-reverse;
+  align-items: flex-end;
+}
+
+.chip {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.chip-action { min-height: var(--tap); padding: 0 16px; font-size: 14px; font-weight: 500; }
+.chip-quiet { color: var(--ui-dim); cursor: default; }
+.chip-key { color: var(--ui-dim); }
+.chip-val { font-weight: 600; }
+.chip:disabled { opacity: .4; cursor: default; }
+
+.hint {
+  position: absolute;
+  left: 50%;
+  bottom: 78px;
+  max-width: calc(100% - 24px);
+  white-space: normal;
+  text-align: center;
+  transform: translateX(-50%);
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: rgba(22, 22, 26, 0.82);
+  color: #fff;
+  font-size: 12px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .4s ease;
+  z-index: 12;
+}
+.hint.show { opacity: 1; }
+
+/* ── bottom sheet ──────────────────────────────────────────────────────── */
+
+.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  height: calc(var(--sheet-h) + var(--safe-b));
+  max-height: calc(100% - var(--topbar-h) - 40px);
+  background: var(--ui-bg);
+  border-top: 1px solid var(--ui-line);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -8px 28px rgba(0, 0, 0, .1);
+  transform: translateY(calc(100% + 4px));
+  transition: transform .26s cubic-bezier(.32, .72, 0, 1);
+  padding-bottom: var(--safe-b);     /* iPhone home indicator */
+}
+.sheet.open { transform: translateY(0); }
+
+.sheet-handle {
+  flex: 0 0 auto;
+  height: 26px;
+  border: 0;
+  background: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.sheet-handle span {
+  display: block;
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ui-line-strong);
+}
+
+.tabs {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 8px 6px;
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.tab {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ui-dim);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.tab[aria-selected="true"] { background: var(--ui-bg-2); color: var(--ink); }
+
+.sheet-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 10px 14px 20px;
+}
+
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* ── sliders ───────────────────────────────────────────────────────────── */
+
+.ctl { padding: 6px 0 10px; }
+
+.ctl-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 30px;
+}
+.ctl-label { font-size: 14px; font-weight: 500; }
+.ctl-sub { display: block; font-size: 11.5px; color: var(--ui-dim); font-weight: 400; margin-top: 1px; }
+
+/* the numeric value doubles as a button that turns into a text field */
+.ctl-val {
+  min-width: 62px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--ui-line);
+  border-radius: 8px;
+  background: var(--ui-bg-2);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  cursor: text;
+}
+input.ctl-val { -moz-appearance: textfield; }
+input.ctl-val::-webkit-outer-spin-button,
+input.ctl-val::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* generous vertical padding gives the thumb a 44px grab area
+   without making the visible track fat */
+.range-wrap { padding: 5px 0; }
+
+input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 34px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+input[type=range]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ui-line-strong);
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 28px;
+  height: 28px;
+  margin-top: -12px;
+  border-radius: 50%;
+  background: var(--ink);
+  border: 3px solid var(--ui-bg);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .28);
+}
+input[type=range]::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ui-line-strong);
+}
+input[type=range]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--ink);
+  border: 3px solid var(--ui-bg);
+}
+
+/* ── segmented control ─────────────────────────────────────────────────── */
+
+.seg {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--ui-bg-2);
+}
+.seg button {
+  flex: 1 1 0;
+  min-height: 38px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  font-size: 14px;
+  cursor: pointer;
+  color: var(--ui-dim);
+}
+.seg button[aria-pressed="true"] { background: var(--ui-bg); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+
+/* ── export panel ──────────────────────────────────────────────────────── */
+
+.stack { display: flex; flex-direction: column; gap: 10px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.row > .btn { flex: 1 1 140px; }
+
+.toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: var(--tap);
+  padding: 0 12px;
+  border: 1px solid var(--ui-line);
+  border-radius: 10px;
+  background: var(--ui-bg);
+  font-size: 14px;
+  cursor: pointer;
+}
+.toggle input { width: 22px; height: 22px; accent-color: var(--ink); }
+
+.note { font-size: 12.5px; line-height: 1.5; color: var(--ui-dim); margin: 2px 0 0; }
+.section-title { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--ui-dim); margin: 14px 0 4px; }
+
+/* ── popovers, scrim, toast ────────────────────────────────────────────── */
+
+/* Deliberately very light: the artwork has to stay readable while the sheet
+   is open, since that is the whole point of tuning parameters. */
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .05);
+  z-index: 35;
+}
+
+/* Lift the canvas chips above the sheet so Fit / Undo stay reachable. */
+body.sheet-open .overlay-bottom {
+  transform: translateY(calc(-1 * (var(--sheet-h) + var(--safe-b))));
+  transition: transform .26s cubic-bezier(.32, .72, 0, 1);
+}
+body.sheet-open .hint { display: none; }
+
+.popover {
+  position: fixed;
+  z-index: 60;
+  min-width: 230px;
+  max-width: min(320px, calc(100vw - 20px));
+  padding: 6px;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: 14px;
+  background: var(--ui-bg);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .18);
+}
+.menu-item, .preset-item {
+  display: block;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  text-align: left;
+  font-size: 15px;
+  cursor: pointer;
+}
+.menu-item:active, .preset-item:active { background: var(--ui-bg-2); }
+.preset-item strong { display: block; font-weight: 600; }
+.preset-item small { display: block; color: var(--ui-dim); font-size: 12px; margin-top: 2px; line-height: 1.35; }
+.preset-item[aria-current="true"] { background: var(--ui-bg-2); }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + var(--safe-b));
+  transform: translateX(-50%);
+  z-index: 80;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(22, 22, 26, .92);
+  color: #fff;
+  font-size: 13.5px;
+  max-width: calc(100vw - 32px);
+  text-align: center;
+}
+
+/* ==========================================================================
+   Wide layout — landscape phone, tablet and desktop.
+   Canvas on the left, controls docked on the right.
+   ========================================================================== */
+
+@media (min-width: 760px), (orientation: landscape) and (min-width: 620px) {
+  #app {
+    grid-template-columns: minmax(0, 1fr) 336px;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  #topbar { grid-column: 1 / -1; }
+  /* plenty of room here — no need to stretch the buttons across the bar */
+  #topbar .btn { flex: 0 0 auto; padding: 0 14px; font-size: 15px; }
+  body.sheet-open .overlay-bottom { transform: none; }
+  #stage { grid-column: 1; grid-row: 2; }
+
+  .sheet {
+    position: relative;
+    grid-column: 2;
+    grid-row: 2;
+    height: auto;
+    max-height: none;
+    transform: none;
+    border-top: 0;
+    border-left: 1px solid var(--ui-line);
+    border-radius: 0;
+    box-shadow: none;
+    padding-bottom: 0;
+    transition: none;
+  }
+  .sheet.collapsed { display: none; }
+  .sheet-handle { display: none; }
+  .sheet-body { padding-bottom: calc(20px + var(--safe-b)); }
+  .scrim { display: none !important; }
+  #btnSettings { display: none; }        /* panel is always there */
+  .overlay-bottom { bottom: calc(8px + var(--safe-b)); }
+}
+
+@media (min-width: 1100px) {
+  #app { grid-template-columns: 1fr 380px; }
+}
+
+/* Landscape phones are short — give the canvas as much height as possible. */
+@media (orientation: landscape) and (max-height: 460px) {
+  :root { --topbar-h: 48px; --tap: 42px; }
+  .btn { min-height: 40px; padding: 0 12px; font-size: 14px; }
+  #topbar { padding-top: 4px; padding-bottom: 4px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet, .hint { transition: none; }
+}
