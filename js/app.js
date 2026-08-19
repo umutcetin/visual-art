@@ -43,6 +43,7 @@
     background: true,
     plotter: false,
     showSeeds: true,
+    animate: true,          // draw the lines on, in order, after a change
     theme: 'auto',          // auto | light | dark
     invertArt: true,        // in dark mode, invert the drawing too
     exportAsShown: false    // export using the on-screen colours
@@ -159,7 +160,9 @@
       ink: col.ink,
       frameColor: frameColor,
       plotter: flags.plotter,
-      frame: true
+      frame: true,
+      reveal: anim ? anim.reveal : null,
+      lengths: anim ? anim.lengths : null
     });
     if (flags.showSeeds) {
       GA.render.drawSeeds(ctx, state.seeds, {
@@ -169,9 +172,125 @@
     }
   }
 
+  /* ---------------------------------------------------------------------- */
+  /* Draw-on animation                                                       */
+  /* ---------------------------------------------------------------------- */
+
+  /*
+   * Lines appear in sequence, each drawing itself from one end to the other.
+   * Two orderings, both of which read as "inside to outside":
+   *
+   *   · no origin  — order by contour level, so every system grows outward
+   *                  from its own seed at once (Generate, presets, first load)
+   *   · an origin  — order by mean distance from that point, so the drawing
+   *                  ripples outward from where you just tapped
+   *
+   * The stagger is short on purpose: the whole thing lands in under a second,
+   * so it reads as the drawing arriving rather than as a loading animation.
+   */
+  var DRAW_MS = 280;        // how long one line takes to draw itself
+  var SPREAD_MS = 560;      // gap between the first line starting and the last
+
+  /*
+   * Only lines still mid-draw need an individual dashed stroke, which is the
+   * expensive part; frame time stays at vsync up to roughly this many paths and
+   * climbs past it. All four presets land between 60 and 180, so they always
+   * animate — it is the very dense hand-tuned settings that skip it. SLOW_FRAME
+   * is the safety net for devices slower than the one this was measured on:
+   * rather than stutter, the drawing simply finishes.
+   */
+  var MAX_ANIM_PATHS = 420;
+  var SLOW_FRAME_MS = 55;
+  var SLOW_FRAMES_ALLOWED = 2;
+
+  var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var anim = null, animRaf = 0, animRequest = null;
+
+  function cancelAnim() {
+    if (animRaf) cancelAnimationFrame(animRaf);
+    animRaf = 0;
+    anim = null;
+  }
+
+  function startAnimation(origin) {
+    cancelAnim();
+    if (!art || !flags.animate || reduceMotion.matches) return;
+    var paths = art.paths, n = paths.length;
+    if (!n || n > MAX_ANIM_PATHS) return;
+
+    var lengths = new Float32Array(n);
+    var key = new Float32Array(n);
+    var i, k, p;
+    var lo = Infinity, hi = -Infinity;
+
+    for (i = 0; i < n; i++) {
+      p = paths[i];
+      lengths[i] = GA.geom.polyLength(p.pts, p.closed);
+      if (origin) {
+        // mean distance, not nearest: a ring should start when the ring as a
+        // whole is reached, not when its closest point is
+        var sum = 0, m = p.pts.length / 2;
+        for (k = 0; k < m; k++) {
+          sum += Math.hypot(p.pts[k * 2] - origin.x, p.pts[k * 2 + 1] - origin.y);
+        }
+        key[i] = m ? sum / m : 0;
+      } else {
+        key[i] = p.level || 0;
+      }
+      if (key[i] < lo) lo = key[i];
+      if (key[i] > hi) hi = key[i];
+    }
+
+    var span = hi - lo || 1;
+    var delays = new Float32Array(n);
+    for (i = 0; i < n; i++) {
+      // a little deterministic jitter so lines sharing a level do not all
+      // start on the very same millisecond — it cascades instead of flashing
+      var jitter = (Math.sin(i * 12.9898) * 43758.5453) % 1;
+      delays[i] = ((key[i] - lo) / span) * SPREAD_MS + Math.abs(jitter) * 45;
+    }
+
+    anim = {
+      t0: performance.now(),
+      delays: delays,
+      lengths: lengths,
+      reveal: new Float32Array(n),
+      last: 0,
+      slow: 0
+    };
+    animRaf = requestAnimationFrame(animFrame);
+  }
+
+  function animFrame(now) {
+    animRaf = 0;
+    if (!anim) return;
+
+    // too slow to be pleasant here — stop pretending and show the drawing
+    if (anim.last && now - anim.last > SLOW_FRAME_MS) {
+      if (++anim.slow >= SLOW_FRAMES_ALLOWED) { cancelAnim(); draw(); return; }
+    }
+    anim.last = now;
+
+    var t = now - anim.t0;
+    var reveal = anim.reveal, delays = anim.delays;
+    var done = true;
+    for (var i = 0; i < reveal.length; i++) {
+      var u = (t - delays[i]) / DRAW_MS;
+      if (u <= 0) { reveal[i] = 0; done = false; continue; }
+      if (u >= 1) { reveal[i] = 1; continue; }
+      done = false;
+      var inv = 1 - u;
+      reveal[i] = 1 - inv * inv * inv;      // ease-out cubic
+    }
+    draw();
+    if (done) { anim = null; draw(); }
+    else animRaf = requestAnimationFrame(animFrame);
+  }
+
   /* While pinching/panning we transform the last rendered bitmap instead of
      re-emitting every Bézier — this is what keeps gestures at 60fps. */
   function beginGesture() {
+    if (anim) { cancelAnim(); draw(); }
     if (!art) return;
     gestureCache = document.createElement('canvas');
     gestureCache.width = canvas.width;
@@ -224,6 +343,12 @@
       console.error(e);
       GA.ui.toast('Generation failed — try a smaller value');
       return;
+    }
+    if (q === 'full' && animRequest) {
+      startAnimation(animRequest.origin);
+      animRequest = null;
+    } else if (q === 'preview') {
+      cancelAnim();          // never animate mid-drag
     }
     draw();
     status(q === 'preview'
@@ -294,6 +419,7 @@
   /* Generate = rebuild the composition deterministically from the current seed. */
   function generate(newSeed) {
     pushUndo();
+    animRequest = { origin: null };
     if (newSeed) state.seed = GA.randomSeed();
     syncArtboard();
     reseed();
@@ -306,6 +432,7 @@
     var p = GA.presetById(id);
     if (!p) return;
     pushUndo();
+    animRequest = { origin: null };
     state.presetId = id;
     Object.keys(p.params).forEach(function (k) { state.params[k] = p.params[k]; });
     syncArtboard();
@@ -542,6 +669,7 @@
     var rng = new GA.RNG((state.seed ^ (state.seeds.length * 2654435761) ^ (Date.now() & 0xffff)) | 0);
     state.seeds.push(GA.generator.makeSeed(rng, wx, wy, state.params, pool));
     state.secondary = null;
+    animRequest = { origin: { x: wx, y: wy } };   // ripple out from the new seed
     request('full');
   }
 
@@ -899,6 +1027,7 @@
     onFlag: function (k, v) {
       flags[k] = v;
       if (k === 'theme') applyTheme();
+      else if (k === 'animate' && !v) { cancelAnim(); draw(); }
       else if (k === 'plotter' || k === 'showSeeds' || k === 'invertArt') draw();
       save();
     },
@@ -921,6 +1050,7 @@
   GA.generator.resolveSeeds(state.seeds, state.params);
   fitToScreen(false);
   syncUI();
+  animRequest = { origin: null };
   request('full');
   if (isWide()) sheet.classList.remove('collapsed');
 
@@ -952,6 +1082,8 @@
   root.CONTOURS = {
     state: state, view: view, flags: flags,
     draw: draw, request: request,
+    _anim: function () { return anim; },
+    _addSeed: function (x, y) { addSeedAt(x, y); },
     setTheme: function (v) { flags.theme = v; applyTheme(); if (uiRef) uiRef.setTheme(v); save(); },
     setFlag: function (k, v) { flags[k] = v; if (k === 'theme') applyTheme(); else draw(); save(); },
     get art() { return art; }

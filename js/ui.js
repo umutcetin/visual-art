@@ -316,6 +316,9 @@
     stack.appendChild(themeCtl.node);
     stack.appendChild(el('p', 'note', 'Auto follows your system setting.'));
 
+    toggleRow('animate', 'Draw the lines on',
+      'New drawings arrive line by line, innermost first. Off is instant — and ' +
+      'it is off anyway if your system asks for reduced motion.');
     toggleRow('invertArt', 'Invert the drawing in dark mode',
       'Off keeps the paper white inside the dark interface — a true preview of ' +
       'what you will print.');

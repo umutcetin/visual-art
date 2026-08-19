@@ -282,13 +282,14 @@
           var g = GA.geom.applyGaps(p, ch.closed, rng, gapOpt);
           for (var q = 0; q < g.parts.length; q++) {
             g.parts[q].w = w;
+            g.parts[q].level = L;      // drives the draw-on order
             paths.push(g.parts[q]);
           }
           if (collectGaps) {
             for (var z = 0; z < g.gaps.length; z++) gapPoints.push(g.gaps[z]);
           }
         } else {
-          paths.push({ pts: p, closed: ch.closed, w: w });
+          paths.push({ pts: p, closed: ch.closed, w: w, level: L });
         }
       }
     }

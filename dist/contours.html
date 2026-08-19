@@ -1871,13 +1871,14 @@ body.sheet-open .hint { display: none; }
           var g = GA.geom.applyGaps(p, ch.closed, rng, gapOpt);
           for (var q = 0; q < g.parts.length; q++) {
             g.parts[q].w = w;
+            g.parts[q].level = L;      // drives the draw-on order
             paths.push(g.parts[q]);
           }
           if (collectGaps) {
             for (var z = 0; z < g.gaps.length; z++) gapPoints.push(g.gaps[z]);
           }
         } else {
-          paths.push({ pts: p, closed: ch.closed, w: w });
+          paths.push({ pts: p, closed: ch.closed, w: w, level: L });
         }
       }
     }
@@ -2022,17 +2023,20 @@ body.sheet-open .hint { display: none; }
     ctx.lineCap = 'round';
     ctx.miterLimit = 2;
 
-    // batch by stroke width so we set state as rarely as possible
-    var buckets = groupByWidth(art.paths, opt.plotter);
-    for (var b = 0; b < buckets.length; b++) {
-      var bucket = buckets[b];
-      ctx.lineWidth = bucket.w;
-      ctx.beginPath();
-      for (var i = 0; i < bucket.paths.length; i++) {
-        var p = bucket.paths[i];
-        GA.geom.emitPath(p.pts, p.closed, ctx);
+    if (opt.reveal) drawRevealed(ctx, art, opt);
+    else {
+      // batch by stroke width so we set state as rarely as possible
+      var buckets = groupByWidth(art.paths, opt.plotter);
+      for (var b = 0; b < buckets.length; b++) {
+        var bucket = buckets[b];
+        ctx.lineWidth = bucket.w;
+        ctx.beginPath();
+        for (var i = 0; i < bucket.paths.length; i++) {
+          var p = bucket.paths[i];
+          GA.geom.emitPath(p.pts, p.closed, ctx);
+        }
+        ctx.stroke();
       }
-      ctx.stroke();
     }
     ctx.restore();
 
@@ -2041,6 +2045,64 @@ body.sheet-open .hint { display: none; }
       ctx.lineWidth = 1 / v.k;
       ctx.strokeRect(0, 0, art.artW, art.artH);
     }
+  }
+
+  /*
+   * Draw-on mode. `opt.reveal[i]` is how much of path i is drawn, 0..1, and
+   * `opt.lengths[i]` is its arc length in art units.
+   *
+   * The trick is a dash pattern of [drawn, everything-else]: with the offset at
+   * zero, the first `L*t` of the path strokes and the remainder falls in the
+   * gap, so the line grows from its own start point. Paths cannot be batched
+   * here — each needs its own dash — which is why the normal renderer above
+   * keeps its fast path.
+   */
+  function drawRevealed(ctx, art, opt) {
+    var paths = art.paths, reveal = opt.reveal, lengths = opt.lengths;
+    var n = paths.length;
+    var i, p, t, w;
+
+    /*
+     * Only the handful of lines currently mid-draw need their own dash state.
+     * Everything already finished is batched exactly like the static renderer,
+     * which is what keeps the frame cost flat as the drawing fills in — and
+     * finished lines are the vast majority for most of the animation.
+     */
+    var widths = [];
+    for (i = 0; i < n; i++) {
+      if (reveal[i] < 0.999) continue;
+      w = opt.plotter ? 1 : paths[i].w;
+      if (widths.indexOf(w) === -1) widths.push(w);
+    }
+    ctx.setLineDash([]);
+    for (var k = 0; k < widths.length; k++) {
+      w = widths[k];
+      ctx.lineWidth = w;
+      ctx.beginPath();
+      for (i = 0; i < n; i++) {
+        if (reveal[i] < 0.999) continue;
+        p = paths[i];
+        if ((opt.plotter ? 1 : p.w) !== w) continue;
+        GA.geom.emitPath(p.pts, p.closed, ctx);
+      }
+      ctx.stroke();
+    }
+
+    for (i = 0; i < n; i++) {
+      t = reveal[i];
+      if (t <= 0.001 || t >= 0.999) continue;   // a 0-length dash stamps a dot
+      p = paths[i];
+      ctx.lineWidth = opt.plotter ? 1 : p.w;
+      // slight overshoot: the Bézier is a touch longer than the polyline it was
+      // measured from, and running over is better than a visible gap at the end
+      var L = lengths[i] * 1.04;
+      ctx.setLineDash([L * t, L * 2]);
+      ctx.lineDashOffset = 0;
+      ctx.beginPath();
+      GA.geom.emitPath(p.pts, p.closed, ctx);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
   }
 
   /* In plotter mode every line gets exactly the same weight. */
@@ -2606,6 +2668,9 @@ body.sheet-open .hint { display: none; }
     stack.appendChild(themeCtl.node);
     stack.appendChild(el('p', 'note', 'Auto follows your system setting.'));
 
+    toggleRow('animate', 'Draw the lines on',
+      'New drawings arrive line by line, innermost first. Off is instant — and ' +
+      'it is off anyway if your system asks for reduced motion.');
     toggleRow('invertArt', 'Invert the drawing in dark mode',
       'Off keeps the paper white inside the dark interface — a true preview of ' +
       'what you will print.');
@@ -2698,6 +2763,7 @@ body.sheet-open .hint { display: none; }
     background: true,
     plotter: false,
     showSeeds: true,
+    animate: true,          // draw the lines on, in order, after a change
     theme: 'auto',          // auto | light | dark
     invertArt: true,        // in dark mode, invert the drawing too
     exportAsShown: false    // export using the on-screen colours
@@ -2814,7 +2880,9 @@ body.sheet-open .hint { display: none; }
       ink: col.ink,
       frameColor: frameColor,
       plotter: flags.plotter,
-      frame: true
+      frame: true,
+      reveal: anim ? anim.reveal : null,
+      lengths: anim ? anim.lengths : null
     });
     if (flags.showSeeds) {
       GA.render.drawSeeds(ctx, state.seeds, {
@@ -2824,9 +2892,125 @@ body.sheet-open .hint { display: none; }
     }
   }
 
+  /* ---------------------------------------------------------------------- */
+  /* Draw-on animation                                                       */
+  /* ---------------------------------------------------------------------- */
+
+  /*
+   * Lines appear in sequence, each drawing itself from one end to the other.
+   * Two orderings, both of which read as "inside to outside":
+   *
+   *   · no origin  — order by contour level, so every system grows outward
+   *                  from its own seed at once (Generate, presets, first load)
+   *   · an origin  — order by mean distance from that point, so the drawing
+   *                  ripples outward from where you just tapped
+   *
+   * The stagger is short on purpose: the whole thing lands in under a second,
+   * so it reads as the drawing arriving rather than as a loading animation.
+   */
+  var DRAW_MS = 280;        // how long one line takes to draw itself
+  var SPREAD_MS = 560;      // gap between the first line starting and the last
+
+  /*
+   * Only lines still mid-draw need an individual dashed stroke, which is the
+   * expensive part; frame time stays at vsync up to roughly this many paths and
+   * climbs past it. All four presets land between 60 and 180, so they always
+   * animate — it is the very dense hand-tuned settings that skip it. SLOW_FRAME
+   * is the safety net for devices slower than the one this was measured on:
+   * rather than stutter, the drawing simply finishes.
+   */
+  var MAX_ANIM_PATHS = 420;
+  var SLOW_FRAME_MS = 55;
+  var SLOW_FRAMES_ALLOWED = 2;
+
+  var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var anim = null, animRaf = 0, animRequest = null;
+
+  function cancelAnim() {
+    if (animRaf) cancelAnimationFrame(animRaf);
+    animRaf = 0;
+    anim = null;
+  }
+
+  function startAnimation(origin) {
+    cancelAnim();
+    if (!art || !flags.animate || reduceMotion.matches) return;
+    var paths = art.paths, n = paths.length;
+    if (!n || n > MAX_ANIM_PATHS) return;
+
+    var lengths = new Float32Array(n);
+    var key = new Float32Array(n);
+    var i, k, p;
+    var lo = Infinity, hi = -Infinity;
+
+    for (i = 0; i < n; i++) {
+      p = paths[i];
+      lengths[i] = GA.geom.polyLength(p.pts, p.closed);
+      if (origin) {
+        // mean distance, not nearest: a ring should start when the ring as a
+        // whole is reached, not when its closest point is
+        var sum = 0, m = p.pts.length / 2;
+        for (k = 0; k < m; k++) {
+          sum += Math.hypot(p.pts[k * 2] - origin.x, p.pts[k * 2 + 1] - origin.y);
+        }
+        key[i] = m ? sum / m : 0;
+      } else {
+        key[i] = p.level || 0;
+      }
+      if (key[i] < lo) lo = key[i];
+      if (key[i] > hi) hi = key[i];
+    }
+
+    var span = hi - lo || 1;
+    var delays = new Float32Array(n);
+    for (i = 0; i < n; i++) {
+      // a little deterministic jitter so lines sharing a level do not all
+      // start on the very same millisecond — it cascades instead of flashing
+      var jitter = (Math.sin(i * 12.9898) * 43758.5453) % 1;
+      delays[i] = ((key[i] - lo) / span) * SPREAD_MS + Math.abs(jitter) * 45;
+    }
+
+    anim = {
+      t0: performance.now(),
+      delays: delays,
+      lengths: lengths,
+      reveal: new Float32Array(n),
+      last: 0,
+      slow: 0
+    };
+    animRaf = requestAnimationFrame(animFrame);
+  }
+
+  function animFrame(now) {
+    animRaf = 0;
+    if (!anim) return;
+
+    // too slow to be pleasant here — stop pretending and show the drawing
+    if (anim.last && now - anim.last > SLOW_FRAME_MS) {
+      if (++anim.slow >= SLOW_FRAMES_ALLOWED) { cancelAnim(); draw(); return; }
+    }
+    anim.last = now;
+
+    var t = now - anim.t0;
+    var reveal = anim.reveal, delays = anim.delays;
+    var done = true;
+    for (var i = 0; i < reveal.length; i++) {
+      var u = (t - delays[i]) / DRAW_MS;
+      if (u <= 0) { reveal[i] = 0; done = false; continue; }
+      if (u >= 1) { reveal[i] = 1; continue; }
+      done = false;
+      var inv = 1 - u;
+      reveal[i] = 1 - inv * inv * inv;      // ease-out cubic
+    }
+    draw();
+    if (done) { anim = null; draw(); }
+    else animRaf = requestAnimationFrame(animFrame);
+  }
+
   /* While pinching/panning we transform the last rendered bitmap instead of
      re-emitting every Bézier — this is what keeps gestures at 60fps. */
   function beginGesture() {
+    if (anim) { cancelAnim(); draw(); }
     if (!art) return;
     gestureCache = document.createElement('canvas');
     gestureCache.width = canvas.width;
@@ -2879,6 +3063,12 @@ body.sheet-open .hint { display: none; }
       console.error(e);
       GA.ui.toast('Generation failed — try a smaller value');
       return;
+    }
+    if (q === 'full' && animRequest) {
+      startAnimation(animRequest.origin);
+      animRequest = null;
+    } else if (q === 'preview') {
+      cancelAnim();          // never animate mid-drag
     }
     draw();
     status(q === 'preview'
@@ -2949,6 +3139,7 @@ body.sheet-open .hint { display: none; }
   /* Generate = rebuild the composition deterministically from the current seed. */
   function generate(newSeed) {
     pushUndo();
+    animRequest = { origin: null };
     if (newSeed) state.seed = GA.randomSeed();
     syncArtboard();
     reseed();
@@ -2961,6 +3152,7 @@ body.sheet-open .hint { display: none; }
     var p = GA.presetById(id);
     if (!p) return;
     pushUndo();
+    animRequest = { origin: null };
     state.presetId = id;
     Object.keys(p.params).forEach(function (k) { state.params[k] = p.params[k]; });
     syncArtboard();
@@ -3197,6 +3389,7 @@ body.sheet-open .hint { display: none; }
     var rng = new GA.RNG((state.seed ^ (state.seeds.length * 2654435761) ^ (Date.now() & 0xffff)) | 0);
     state.seeds.push(GA.generator.makeSeed(rng, wx, wy, state.params, pool));
     state.secondary = null;
+    animRequest = { origin: { x: wx, y: wy } };   // ripple out from the new seed
     request('full');
   }
 
@@ -3554,6 +3747,7 @@ body.sheet-open .hint { display: none; }
     onFlag: function (k, v) {
       flags[k] = v;
       if (k === 'theme') applyTheme();
+      else if (k === 'animate' && !v) { cancelAnim(); draw(); }
       else if (k === 'plotter' || k === 'showSeeds' || k === 'invertArt') draw();
       save();
     },
@@ -3576,6 +3770,7 @@ body.sheet-open .hint { display: none; }
   GA.generator.resolveSeeds(state.seeds, state.params);
   fitToScreen(false);
   syncUI();
+  animRequest = { origin: null };
   request('full');
   if (isWide()) sheet.classList.remove('collapsed');
 
@@ -3607,6 +3802,8 @@ body.sheet-open .hint { display: none; }
   root.CONTOURS = {
     state: state, view: view, flags: flags,
     draw: draw, request: request,
+    _anim: function () { return anim; },
+    _addSeed: function (x, y) { addSeedAt(x, y); },
     setTheme: function (v) { flags.theme = v; applyTheme(); if (uiRef) uiRef.setTheme(v); save(); },
     setFlag: function (k, v) { flags[k] = v; if (k === 'theme') applyTheme(); else draw(); save(); },
     get art() { return art; }

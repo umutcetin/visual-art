@@ -56,17 +56,20 @@
     ctx.lineCap = 'round';
     ctx.miterLimit = 2;
 
-    // batch by stroke width so we set state as rarely as possible
-    var buckets = groupByWidth(art.paths, opt.plotter);
-    for (var b = 0; b < buckets.length; b++) {
-      var bucket = buckets[b];
-      ctx.lineWidth = bucket.w;
-      ctx.beginPath();
-      for (var i = 0; i < bucket.paths.length; i++) {
-        var p = bucket.paths[i];
-        GA.geom.emitPath(p.pts, p.closed, ctx);
+    if (opt.reveal) drawRevealed(ctx, art, opt);
+    else {
+      // batch by stroke width so we set state as rarely as possible
+      var buckets = groupByWidth(art.paths, opt.plotter);
+      for (var b = 0; b < buckets.length; b++) {
+        var bucket = buckets[b];
+        ctx.lineWidth = bucket.w;
+        ctx.beginPath();
+        for (var i = 0; i < bucket.paths.length; i++) {
+          var p = bucket.paths[i];
+          GA.geom.emitPath(p.pts, p.closed, ctx);
+        }
+        ctx.stroke();
       }
-      ctx.stroke();
     }
     ctx.restore();
 
@@ -75,6 +78,64 @@
       ctx.lineWidth = 1 / v.k;
       ctx.strokeRect(0, 0, art.artW, art.artH);
     }
+  }
+
+  /*
+   * Draw-on mode. `opt.reveal[i]` is how much of path i is drawn, 0..1, and
+   * `opt.lengths[i]` is its arc length in art units.
+   *
+   * The trick is a dash pattern of [drawn, everything-else]: with the offset at
+   * zero, the first `L*t` of the path strokes and the remainder falls in the
+   * gap, so the line grows from its own start point. Paths cannot be batched
+   * here — each needs its own dash — which is why the normal renderer above
+   * keeps its fast path.
+   */
+  function drawRevealed(ctx, art, opt) {
+    var paths = art.paths, reveal = opt.reveal, lengths = opt.lengths;
+    var n = paths.length;
+    var i, p, t, w;
+
+    /*
+     * Only the handful of lines currently mid-draw need their own dash state.
+     * Everything already finished is batched exactly like the static renderer,
+     * which is what keeps the frame cost flat as the drawing fills in — and
+     * finished lines are the vast majority for most of the animation.
+     */
+    var widths = [];
+    for (i = 0; i < n; i++) {
+      if (reveal[i] < 0.999) continue;
+      w = opt.plotter ? 1 : paths[i].w;
+      if (widths.indexOf(w) === -1) widths.push(w);
+    }
+    ctx.setLineDash([]);
+    for (var k = 0; k < widths.length; k++) {
+      w = widths[k];
+      ctx.lineWidth = w;
+      ctx.beginPath();
+      for (i = 0; i < n; i++) {
+        if (reveal[i] < 0.999) continue;
+        p = paths[i];
+        if ((opt.plotter ? 1 : p.w) !== w) continue;
+        GA.geom.emitPath(p.pts, p.closed, ctx);
+      }
+      ctx.stroke();
+    }
+
+    for (i = 0; i < n; i++) {
+      t = reveal[i];
+      if (t <= 0.001 || t >= 0.999) continue;   // a 0-length dash stamps a dot
+      p = paths[i];
+      ctx.lineWidth = opt.plotter ? 1 : p.w;
+      // slight overshoot: the Bézier is a touch longer than the polyline it was
+      // measured from, and running over is better than a visible gap at the end
+      var L = lengths[i] * 1.04;
+      ctx.setLineDash([L * t, L * 2]);
+      ctx.lineDashOffset = 0;
+      ctx.beginPath();
+      GA.geom.emitPath(p.pts, p.closed, ctx);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
   }
 
   /* In plotter mode every line gets exactly the same weight. */

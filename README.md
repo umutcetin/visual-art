@@ -102,6 +102,19 @@ than being drawn on top.
 The same path list feeds the canvas renderer and the SVG writer, which is why
 the SVG contains real `M … C …` geometry and never an embedded bitmap.
 
+**Drawing it on.** A new composition arrives line by line rather than all at
+once, innermost contour first, each line drawing itself from one end to the
+other — the whole cascade lands in under a second. Two orderings share one
+timeline: Generate, the presets and the first load stagger by contour level, so
+every system grows outward from its own seed at the same time; tapping to add a
+seed staggers by mean distance from that point instead, so the drawing ripples
+outward from your finger. On canvas this is a dash pattern of
+`[drawn, everything-else]` per path — finished lines are batched exactly like
+the static renderer, and only the handful still mid-draw carry their own dash,
+which is what keeps the frame cost flat. Dragging a slider or a seed cancels it;
+so does `prefers-reduced-motion`, a path count past ~420, or simply a device too
+slow to hold the frame rate. *Display → Draw the lines on* switches it off.
+
 ---
 
 ## 2. Which parameters produce the most interesting results
