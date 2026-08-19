@@ -3791,9 +3791,15 @@ body.sheet-open .hint { display: none; }
     try { localStorage.setItem(STORE_KEY + '.seen', '1'); } catch (e) {}
   }
 
-  // PWA — only meaningful over http(s); opening index.html from disk still works
-  if ('serviceWorker' in navigator &&
-      (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  /*
+   * PWA. `isSecureContext` is the actual rule the browser applies — it covers
+   * https, localhost AND 127.0.0.1, which a hostname check misses. file:// can
+   * report as secure in some browsers but has no registration support, so it is
+   * excluded explicitly; opening index.html from disk works, just without
+   * offline caching.
+   */
+  if ('serviceWorker' in navigator && window.isSecureContext &&
+      location.protocol !== 'file:') {
     window.addEventListener('load', function () {
       navigator.serviceWorker.register('sw.js').catch(function () {});
     });
