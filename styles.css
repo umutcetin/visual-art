@@ -5,13 +5,23 @@
    ========================================================================== */
 
 :root {
-  --paper: #faf8f4;
-  --ink: #16161a;
-  --ui-bg: #ffffff;
-  --ui-bg-2: #f3f1ec;
+  /* Interface palette. The ARTWORK's own paper/ink live in js/render.js —
+     they are a print decision, not a theme decision, so they are kept apart. */
+  --ui-bg: #ffffff;          /* panels, bars, popovers */
+  --ui-bg-2: #f3f1ec;        /* recessed surfaces and the area around the sheet */
+  --ui-fg: #16161a;          /* primary text */
+  --ui-on-fg: #faf8f4;       /* text sitting on a --ui-fg fill */
+  --ui-fg-active: #33333a;   /* pressed state of a --ui-fg fill */
   --ui-line: #e0ddd5;
   --ui-line-strong: #cdc9bf;
   --ui-dim: #6f6b62;
+  --chip-bg: rgba(255, 255, 255, 0.92);
+  --overlay-bg: rgba(22, 22, 26, 0.86);   /* hint + toast */
+  --overlay-fg: #ffffff;
+  --scrim: rgba(0, 0, 0, .05);
+  --shadow-sheet: 0 -8px 28px rgba(0, 0, 0, .1);
+  --shadow-pop: 0 12px 34px rgba(0, 0, 0, .18);
+  --shadow-thumb: 0 1px 4px rgba(0, 0, 0, .28);
   --radius: 12px;
   --tap: 44px;                       /* minimum touch target */
   --topbar-h: 56px;
@@ -24,6 +34,51 @@
           "Helvetica Neue", Arial, sans-serif;
 }
 
+/*
+ * Dark palette. Declared twice on purpose:
+ *   · the media query covers "Auto", the default, where nothing is stamped on
+ *     <html> — guarded so an explicit Light choice still wins on a dark OS
+ *   · the attribute rule covers an explicit Dark choice on a light OS
+ * Only the tokens change; no component rule below knows which theme is active.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ui-bg: #1b1b20;
+    --ui-bg-2: #101013;
+    --ui-fg: #ecebe6;
+    --ui-on-fg: #16161a;
+    --ui-fg-active: #cfcdc6;
+    --ui-line: #2e2e35;
+    --ui-line-strong: #44444e;
+    --ui-dim: #9b968c;
+    --chip-bg: rgba(27, 27, 32, 0.92);
+    --overlay-bg: rgba(236, 235, 230, 0.92);
+    --overlay-fg: #16161a;
+    --scrim: rgba(0, 0, 0, .2);
+    --shadow-sheet: 0 -8px 28px rgba(0, 0, 0, .5);
+    --shadow-pop: 0 12px 34px rgba(0, 0, 0, .55);
+    --shadow-thumb: 0 1px 4px rgba(0, 0, 0, .6);
+  }
+}
+
+:root[data-theme="dark"] {
+  --ui-bg: #1b1b20;
+  --ui-bg-2: #101013;
+  --ui-fg: #ecebe6;
+  --ui-on-fg: #16161a;
+  --ui-fg-active: #cfcdc6;
+  --ui-line: #2e2e35;
+  --ui-line-strong: #44444e;
+  --ui-dim: #9b968c;
+  --chip-bg: rgba(27, 27, 32, 0.92);
+  --overlay-bg: rgba(236, 235, 230, 0.92);
+  --overlay-fg: #16161a;
+  --scrim: rgba(0, 0, 0, .2);
+  --shadow-sheet: 0 -8px 28px rgba(0, 0, 0, .5);
+  --shadow-pop: 0 12px 34px rgba(0, 0, 0, .55);
+  --shadow-thumb: 0 1px 4px rgba(0, 0, 0, .6);
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -33,7 +88,7 @@ html, body {
   overflow: hidden;                  /* no page scrolling, ever */
   overscroll-behavior: none;
   background: var(--ui-bg-2);
-  color: var(--ink);
+  color: var(--ui-fg);
   font-family: var(--font);
   font-size: 16px;
   -webkit-text-size-adjust: 100%;
@@ -68,7 +123,7 @@ button { touch-action: manipulation; }
   padding-top: calc(6px + var(--safe-t));
   background: var(--ui-bg);
   border-bottom: 1px solid var(--ui-line);
-  z-index: 30;
+  z-index: 36;             /* above the scrim — the top bar never dims */
 }
 
 /* Buttons share the bar evenly and shrink their padding before their height,
@@ -98,9 +153,9 @@ button { touch-action: manipulation; }
   transition: background .12s ease, border-color .12s ease;
 }
 .btn:active { background: var(--ui-bg-2); }
-.btn[aria-expanded="true"] { background: var(--ui-bg-2); border-color: var(--ink); }
-.btn-primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
-.btn-primary:active { background: #33333a; }
+.btn[aria-expanded="true"] { background: var(--ui-bg-2); border-color: var(--ui-fg); }
+.btn-primary { background: var(--ui-fg); color: var(--ui-on-fg); border-color: var(--ui-fg); }
+.btn-primary:active { background: var(--ui-fg-active); }
 
 /* ── canvas stage ──────────────────────────────────────────────────────── */
 
@@ -147,7 +202,7 @@ button { touch-action: manipulation; }
   padding: 0 12px;
   border: 1px solid var(--ui-line-strong);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--chip-bg);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   font-size: 13px;
@@ -170,8 +225,9 @@ button { touch-action: manipulation; }
   transform: translateX(-50%);
   padding: 7px 14px;
   border-radius: 999px;
-  background: rgba(22, 22, 26, 0.82);
-  color: #fff;
+  border: 1px solid var(--ui-line-strong);
+  background: var(--overlay-bg);
+  color: var(--overlay-fg);
   font-size: 12px;
   pointer-events: none;
   opacity: 0;
@@ -195,7 +251,7 @@ button { touch-action: manipulation; }
   background: var(--ui-bg);
   border-top: 1px solid var(--ui-line);
   border-radius: 16px 16px 0 0;
-  box-shadow: 0 -8px 28px rgba(0, 0, 0, .1);
+  box-shadow: var(--shadow-sheet);
   transform: translateY(calc(100% + 4px));
   transition: transform .26s cubic-bezier(.32, .72, 0, 1);
   padding-bottom: var(--safe-b);     /* iPhone home indicator */
@@ -242,7 +298,7 @@ button { touch-action: manipulation; }
   font-weight: 500;
   cursor: pointer;
 }
-.tab[aria-selected="true"] { background: var(--ui-bg-2); color: var(--ink); }
+.tab[aria-selected="true"] { background: var(--ui-bg-2); color: var(--ui-fg); }
 
 .sheet-body {
   flex: 1 1 auto;
@@ -311,9 +367,9 @@ input[type=range]::-webkit-slider-thumb {
   height: 28px;
   margin-top: -12px;
   border-radius: 50%;
-  background: var(--ink);
+  background: var(--ui-fg);
   border: 3px solid var(--ui-bg);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, .28);
+  box-shadow: var(--shadow-thumb);
 }
 input[type=range]::-moz-range-track {
   height: 4px;
@@ -324,7 +380,7 @@ input[type=range]::-moz-range-thumb {
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: var(--ink);
+  background: var(--ui-fg);
   border: 3px solid var(--ui-bg);
 }
 
@@ -347,7 +403,7 @@ input[type=range]::-moz-range-thumb {
   cursor: pointer;
   color: var(--ui-dim);
 }
-.seg button[aria-pressed="true"] { background: var(--ui-bg); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.seg button[aria-pressed="true"] { background: var(--ui-bg); color: var(--ui-fg); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
 
 /* ── export panel ──────────────────────────────────────────────────────── */
 
@@ -368,7 +424,7 @@ input[type=range]::-moz-range-thumb {
   font-size: 14px;
   cursor: pointer;
 }
-.toggle input { width: 22px; height: 22px; accent-color: var(--ink); }
+.toggle input { width: 22px; height: 22px; accent-color: var(--ui-fg); }
 
 .note { font-size: 12.5px; line-height: 1.5; color: var(--ui-dim); margin: 2px 0 0; }
 .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--ui-dim); margin: 14px 0 4px; }
@@ -380,7 +436,7 @@ input[type=range]::-moz-range-thumb {
 .scrim {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, .05);
+  background: var(--scrim);
   z-index: 35;
 }
 
@@ -400,7 +456,7 @@ body.sheet-open .hint { display: none; }
   border: 1px solid var(--ui-line-strong);
   border-radius: 14px;
   background: var(--ui-bg);
-  box-shadow: 0 12px 34px rgba(0, 0, 0, .18);
+  box-shadow: var(--shadow-pop);
 }
 .menu-item, .preset-item {
   display: block;
@@ -427,8 +483,9 @@ body.sheet-open .hint { display: none; }
   z-index: 80;
   padding: 10px 16px;
   border-radius: 999px;
-  background: rgba(22, 22, 26, .92);
-  color: #fff;
+  border: 1px solid var(--ui-line-strong);
+  background: var(--overlay-bg);
+  color: var(--overlay-fg);
   font-size: 13.5px;
   max-width: calc(100vw - 32px);
   text-align: center;

@@ -111,7 +111,7 @@
       widgets[c.key] = w;
     });
 
-    buildExportPanel(panels['export'], opts);
+    var extras = buildExportPanel(panels['export'], opts);
 
     return {
       activate: activate,
@@ -119,6 +119,9 @@
       sync: function () {
         CONTROLS.forEach(function (c) { widgets[c.key].set(opts.get(c.key)); });
       },
+      /* The theme can also be changed from the More menu — keep the segmented
+         control in the panel in step with it. */
+      setTheme: function (v) { extras.theme.set(v); },
       controls: CONTROLS
     };
   }
@@ -276,38 +279,51 @@
     pngScale.set(opts.flags.pngScale);
     stack.appendChild(pngScale.node);
 
-    [
-      ['background', 'Paper background', 'Off gives a transparent PNG and a background-free SVG'],
-      ['plotter', 'Plotter mode', 'One uniform hairline weight for every path']
-    ].forEach(function (f) {
+    /* A checkbox row plus its explanatory note. */
+    function toggleRow(key, label, note) {
       var lbl = el('label', 'toggle');
       var text = el('span');
-      text.appendChild(el('strong', null, f[1]));
+      text.appendChild(el('strong', null, label));
       var cb = document.createElement('input');
       cb.type = 'checkbox';
-      cb.checked = !!opts.flags[f[0]];
-      cb.addEventListener('change', function () { opts.onFlag(f[0], cb.checked); });
+      cb.checked = !!opts.flags[key];
+      cb.addEventListener('change', function () { opts.onFlag(key, cb.checked); });
       lbl.appendChild(text);
       lbl.appendChild(cb);
       stack.appendChild(lbl);
-      stack.appendChild(el('p', 'note', f[2]));
-    });
+      if (note) stack.appendChild(el('p', 'note', note));
+      return cb;
+    }
 
-    stack.appendChild(el('div', 'section-title', 'Drawing'));
-    var showSeeds = el('label', 'toggle');
-    var st = el('span');
-    st.appendChild(el('strong', null, 'Show seed handles'));
-    var scb = document.createElement('input');
-    scb.type = 'checkbox';
-    scb.checked = !!opts.flags.showSeeds;
-    scb.addEventListener('change', function () { opts.onFlag('showSeeds', scb.checked); });
-    showSeeds.appendChild(st);
-    showSeeds.appendChild(scb);
-    stack.appendChild(showSeeds);
-    stack.appendChild(el('p', 'note',
-      'Handles are on-screen only — they never appear in an exported PNG or SVG.'));
+    toggleRow('background', 'Paper background',
+      'Off gives a transparent PNG and a background-free SVG');
+    toggleRow('plotter', 'Plotter mode',
+      'One uniform hairline weight for every path');
+    toggleRow('exportAsShown', 'Match screen colours',
+      'Off always exports dark lines on paper, whatever the theme — that is the ' +
+      'version you print, plot or cut.');
+
+    /* ---- screen-only display options --------------------------------- */
+    stack.appendChild(el('div', 'section-title', 'Display'));
+
+    var themeCtl = makeSegment({
+      key: 'theme', label: 'Theme',
+      options: [['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']]
+    }, {
+      onParam: function (k, v) { opts.onFlag('theme', v); }
+    });
+    themeCtl.set(opts.flags.theme);
+    stack.appendChild(themeCtl.node);
+    stack.appendChild(el('p', 'note', 'Auto follows your system setting.'));
+
+    toggleRow('invertArt', 'Invert the drawing in dark mode',
+      'Off keeps the paper white inside the dark interface — a true preview of ' +
+      'what you will print.');
+    toggleRow('showSeeds', 'Show seed handles',
+      'Handles are on-screen only — they never appear in an exported PNG or SVG.');
 
     panel.appendChild(stack);
+    return { theme: themeCtl };
   }
 
   /* --------------------------------------------------------------------- */

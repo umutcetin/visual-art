@@ -42,13 +42,66 @@
     pngScale: 2,
     background: true,
     plotter: false,
-    showSeeds: true
+    showSeeds: true,
+    theme: 'auto',          // auto | light | dark
+    invertArt: true,        // in dark mode, invert the drawing too
+    exportAsShown: false    // export using the on-screen colours
   };
 
   var view = { x: 0, y: 0, k: 1 };
   var art = null;
   var undoStack = [];
   var userMovedView = false;
+
+  /* ---------------------------------------------------------------------- */
+  /* Theme                                                                   */
+  /* ---------------------------------------------------------------------- */
+
+  var darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
+
+  function isDark() {
+    if (flags.theme === 'dark') return true;
+    if (flags.theme === 'light') return false;
+    return darkQuery.matches;
+  }
+
+  /*
+   * Screen colours for the drawing. In dark mode the artwork inverts too,
+   * unless the user has asked to keep the paper white — which is a genuine
+   * use case here, since it previews exactly what will be printed or cut.
+   */
+  function artColors() {
+    return (isDark() && flags.invertArt) ? GA.render.SCREEN_DARK : GA.render.PRINT;
+  }
+
+  /* Colours a PNG/SVG is written with. Printable by default. */
+  function exportColors() {
+    return flags.exportAsShown ? artColors() : GA.render.PRINT;
+  }
+
+  var pageColor = '#f3f1ec';
+  var frameColor = 'rgba(0,0,0,0.16)';
+
+  function applyTheme() {
+    var root = document.documentElement;
+    if (flags.theme === 'auto') root.removeAttribute('data-theme');
+    else root.setAttribute('data-theme', flags.theme);
+
+    // read the resolved tokens back out so the canvas matches the CSS exactly
+    var cs = getComputedStyle(root);
+    pageColor = cs.getPropertyValue('--ui-bg-2').trim() || '#f3f1ec';
+    frameColor = isDark() ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.16)';
+
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', cs.getPropertyValue('--ui-bg').trim());
+
+    draw();
+  }
+
+  // "Auto" has to follow the system if it changes while the app is open
+  var onSchemeChange = function () { if (flags.theme === 'auto') applyTheme(); };
+  if (darkQuery.addEventListener) darkQuery.addEventListener('change', onSchemeChange);
+  else if (darkQuery.addListener) darkQuery.addListener(onSchemeChange);
 
   /* ---------------------------------------------------------------------- */
   /* Canvas sizing                                                           */
@@ -93,19 +146,26 @@
     if (gestureCache) return drawGestureFrame();
     if (!art) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.fillStyle = '#f3f1ec';
+      ctx.fillStyle = pageColor;
       ctx.fillRect(0, 0, cssW, cssH);
       return;
     }
+    var col = artColors();
     GA.render.draw(ctx, art, {
       dpr: dpr, width: cssW, height: cssH, view: view,
-      pageColor: '#f3f1ec',
+      pageColor: pageColor,
       background: true,
+      paper: col.paper,
+      ink: col.ink,
+      frameColor: frameColor,
       plotter: flags.plotter,
       frame: true
     });
     if (flags.showSeeds) {
-      GA.render.drawSeeds(ctx, state.seeds, { dpr: dpr, view: view, activeIndex: dragIndex });
+      GA.render.drawSeeds(ctx, state.seeds, {
+        dpr: dpr, view: view, activeIndex: dragIndex,
+        paper: col.paper, ink: col.ink
+      });
     }
   }
 
@@ -125,7 +185,7 @@
     var tx = view.x - gestureView.x * s;
     var ty = view.y - gestureView.y * s;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = '#f3f1ec';
+    ctx.fillStyle = pageColor;
     ctx.fillRect(0, 0, cssW, cssH);
     ctx.setTransform(dpr * s, 0, 0, dpr * s, dpr * tx, dpr * ty);
     ctx.imageSmoothingQuality = 'high';
@@ -299,7 +359,7 @@
   }
 
   function syncUI() {
-    if (uiRef) uiRef.sync();
+    if (uiRef) { uiRef.sync(); uiRef.setTheme(flags.theme); }
     updateSeedChip();
     updatePresetChip();
   }
@@ -322,9 +382,12 @@
   }
 
   function exportSVG() {
+    var col = exportColors();
     var svg = GA.exporters.toSVG(art, {
       background: flags.background,
       plotter: flags.plotter,
+      paper: col.paper,
+      ink: col.ink,
       meta: { seed: state.seed, preset: state.presetId, params: state.params }
     });
     var blob = new Blob([svg], { type: 'image/svg+xml' });
@@ -333,8 +396,10 @@
   }
 
   function exportPNG() {
+    var col = exportColors();
     var c = GA.exporters.toCanvas(art, {
-      scale: flags.pngScale, background: flags.background, plotter: flags.plotter
+      scale: flags.pngScale, background: flags.background, plotter: flags.plotter,
+      paper: col.paper, ink: col.ink
     });
     GA.exporters.canvasToBlob(c).then(function (blob) {
       GA.exporters.saveBlob(blob, fileBase() + '.png');
@@ -344,8 +409,10 @@
 
   function shareArt() {
     if (!navigator.share) { GA.ui.toast('Sharing is not available in this browser'); return; }
+    var col = exportColors();
     var c = GA.exporters.toCanvas(art, {
-      scale: Math.min(flags.pngScale, 3), background: true, plotter: flags.plotter
+      scale: Math.min(flags.pngScale, 3), background: true, plotter: flags.plotter,
+      paper: col.paper, ink: col.ink
     });
     GA.exporters.canvasToBlob(c).then(function (blob) {
       GA.exporters.shareFile(blob, fileBase() + '.png', 'Contour study — seed ' + state.seed)
@@ -686,6 +753,8 @@
     var wasOpen = !menu.hidden;
     closeMenus();
     if (wasOpen) return;
+    document.getElementById('miTheme').textContent =
+      isDark() ? 'Switch to light mode' : 'Switch to dark mode';
     Array.prototype.forEach.call(presetMenu.children, function (c) {
       c.setAttribute('aria-current', c.dataset.preset === state.presetId ? 'true' : 'false');
     });
@@ -713,12 +782,22 @@
     if (act === 'undo') undo();
     else if (act === 'reset') resetAll();
     else if (act === 'fit') fitToScreen();
+    else if (act === 'theme') toggleTheme();
     else if (act === 'png') exportPNG();
     else if (act === 'svg') exportSVG();
     else if (act === 'share') shareArt();
     else if (act === 'fullscreen') toggleFullscreen();
     else if (act === 'seedcopy') copySettings();
   });
+
+  /* From the More menu: flip to the opposite of what is showing, and make it
+     an explicit choice rather than leaving it on Auto. */
+  function toggleTheme() {
+    flags.theme = isDark() ? 'light' : 'dark';
+    applyTheme();
+    if (uiRef) uiRef.setTheme(flags.theme);
+    save();
+  }
 
   function toggleFullscreen() {
     var d = document.documentElement;
@@ -798,7 +877,8 @@
     flags: flags,
     onFlag: function (k, v) {
       flags[k] = v;
-      if (k === 'plotter' || k === 'showSeeds') draw();
+      if (k === 'theme') applyTheme();
+      else if (k === 'plotter' || k === 'showSeeds' || k === 'invertArt') draw();
       save();
     },
     onExport: function (kind) {
@@ -809,6 +889,7 @@
   });
 
   var restored = load();
+  applyTheme();
   resize();
   // a restored drawing keeps the artboard it was made on, otherwise the stored
   // seed positions would no longer match the composition
@@ -847,6 +928,11 @@
     });
   }
 
-  root.CONTOURS = { state: state, view: view, draw: draw, request: request,
-                    get art() { return art; } };
+  root.CONTOURS = {
+    state: state, view: view, flags: flags,
+    draw: draw, request: request,
+    setTheme: function (v) { flags.theme = v; applyTheme(); if (uiRef) uiRef.setTheme(v); save(); },
+    setFlag: function (k, v) { flags[k] = v; if (k === 'theme') applyTheme(); else draw(); save(); },
+    get art() { return art; }
+  };
 })(typeof window !== 'undefined' ? window : globalThis);

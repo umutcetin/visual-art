@@ -8,8 +8,17 @@
   'use strict';
   var GA = (root.GA = root.GA || {});
 
-  var PAPER = '#faf8f4';
-  var INK = '#16161a';
+  /*
+   * The artwork has two colour pairs, and they are a *drawing* decision rather
+   * than an interface theme: PRINT is what gets exported and fabricated, SCREEN
+   * is the inverted pair used when the app is in dark mode so a phone at night
+   * is not showing a blazing white rectangle.
+   */
+  var PRINT = { paper: '#faf8f4', ink: '#16161a' };
+  var SCREEN_DARK = { paper: '#141418', ink: '#e9e7e1' };
+
+  var PAPER = PRINT.paper;
+  var INK = PRINT.ink;
 
   /*
    * ctx      canvas 2D context (already sized in device pixels)
@@ -33,7 +42,7 @@
     ctx.setTransform(dpr * v.k, 0, 0, dpr * v.k, dpr * v.x, dpr * v.y);
 
     if (opt.background !== false) {
-      ctx.fillStyle = PAPER;
+      ctx.fillStyle = opt.paper || PAPER;
       ctx.fillRect(0, 0, art.artW, art.artH);
     }
 
@@ -62,7 +71,7 @@
     ctx.restore();
 
     if (opt.frame) {
-      ctx.strokeStyle = 'rgba(0,0,0,0.16)';
+      ctx.strokeStyle = opt.frameColor || 'rgba(0,0,0,0.16)';
       ctx.lineWidth = 1 / v.k;
       ctx.strokeRect(0, 0, art.artW, art.artH);
     }
@@ -84,22 +93,32 @@
   function drawSeeds(ctx, seeds, opt) {
     var dpr = opt.dpr || 1, v = opt.view;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // handles read as ink on paper, so they invert along with the drawing
+    var fill = opt.ink || INK;
+    var halo = opt.paper || PAPER;
     for (var i = 0; i < seeds.length; i++) {
       var s = seeds[i];
       var sx = s.x * v.k + v.x;
       var sy = s.y * v.k + v.y;
       var active = opt.activeIndex === i;
+      var r = active ? 9 : 5.5;
+      ctx.globalAlpha = active ? 0.9 : 0.3;
       ctx.beginPath();
-      ctx.arc(sx, sy, active ? 9 : 5.5, 0, Math.PI * 2);
-      ctx.fillStyle = active ? 'rgba(20,20,24,0.9)' : 'rgba(20,20,24,0.28)';
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fillStyle = fill;
       ctx.fill();
+      ctx.globalAlpha = 0.9;
       ctx.beginPath();
-      ctx.arc(sx, sy, active ? 9 : 5.5, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(250,248,244,0.9)';
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.strokeStyle = halo;
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
+    ctx.globalAlpha = 1;
   }
 
-  GA.render = { draw: draw, drawSeeds: drawSeeds, PAPER: PAPER, INK: INK, groupByWidth: groupByWidth };
+  GA.render = {
+    draw: draw, drawSeeds: drawSeeds, groupByWidth: groupByWidth,
+    PAPER: PAPER, INK: INK, PRINT: PRINT, SCREEN_DARK: SCREEN_DARK
+  };
 })(typeof window !== 'undefined' ? window : globalThis);

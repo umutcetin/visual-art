@@ -7,6 +7,14 @@ architectural drawings. No frameworks, no backend, no external APIs — open
 Monochrome by default: off-white paper, charcoal lines, no gradients, so the
 output is ready to plot, print, laser-cut or emboss.
 
+Light and dark themes, following the system setting unless you pick one
+explicitly (Export tab → Display, or the More menu). In dark mode the drawing
+inverts too — white lines on near-black — while **exports stay printable**: a
+PNG or SVG is always dark lines on paper unless you turn on *Match screen
+colours*. Interface colours live entirely in CSS custom properties in
+`styles.css`; the artwork's own paper/ink pair lives in `js/render.js`, because
+that is a printing decision rather than a theme.
+
 ```
 index.html            markup shell
 styles.css            interface styles (mobile first)
@@ -130,7 +138,7 @@ the SVG contains real `M … C …` geometry and never an embedded bitmap.
 type a number to go straight back to a drawing. *More → Copy settings link*
 puts the seed and every parameter into the URL. Everything is also stored in
 `localStorage`, so a refresh keeps exactly what was on screen, including seeds
-you added or moved by hand.
+you added or moved by hand and your theme choice.
 
 ---
 
@@ -170,6 +178,7 @@ Cutters want **closed** paths and a hairline stroke.
   crops the design cleanly to the artboard.
 - In `js/exporters.js`, set the stroke to the cutter's convention (usually
   `stroke="#f00"` at `stroke-width="0.01"`) and turn the paper background off.
+  Leave *Match screen colours* off so a dark theme never leaks into the file.
 - For cut-and-drop pieces rather than score lines, raise *Contour spacing* so
   the remaining material between rings is wider than your kerf — around 3 mm of
   physical spacing is a safe starting point.

@@ -51,7 +51,7 @@
       '" height="' + H + '"/></clipPath></defs>');
     if (opt.background !== false) {
       out.push('  <rect x="0" y="0" width="' + W + '" height="' + H +
-        '" fill="' + GA.render.PAPER + '"/>');
+        '" fill="' + (opt.paper || GA.render.PAPER) + '"/>');
     }
     out.push('  <g clip-path="url(#board)" fill="none" stroke="' + ink +
       '" stroke-linecap="round" stroke-linejoin="round">');
@@ -86,6 +86,8 @@
       height: c.height,
       view: { x: 0, y: 0, k: scale },
       background: opt.background !== false,
+      paper: opt.paper,
+      ink: opt.ink,
       plotter: opt.plotter,
       frame: false
     });

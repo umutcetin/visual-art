@@ -1,5 +1,5 @@
 /* Minimal offline cache. Bump CACHE when files change. */
-var CACHE = 'contours-v1';
+var CACHE = 'contours-v2';
 var ASSETS = [
   './', './index.html', './styles.css', './manifest.webmanifest', './icon.svg',
   './js/rng.js', './js/noise.js', './js/edt.js', './js/field.js',
