@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#faf8f4">
-<meta name="description" content="Generative contour drawings — an offline tool for topographic, biomorphic and architectural line art.">
+<meta name="description" content="Generative colour and contour drawings — an offline tool for organic, topographic and geometric line art.">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Contours">
-<title>Contours — generative topographic drawings</title>
+<title>Contours — generative colour and geometric drawings</title>
 <style>
 /* ==========================================================================
    Contours — interface styles
@@ -417,6 +417,30 @@ input[type=range]::-moz-range-thumb {
   color: var(--ui-dim);
 }
 .seg button[aria-pressed="true"] { background: var(--ui-bg); color: var(--ui-fg); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+
+/* ── artwork palettes ──────────────────────────────────────────────────── */
+
+.palette-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+.palette-option {
+  min-height: 58px;
+  padding: 8px;
+  border: 1px solid var(--ui-line);
+  border-radius: 10px;
+  background: var(--ui-bg);
+  cursor: pointer;
+  text-align: left;
+}
+.palette-option[aria-pressed="true"] {
+  border-color: var(--ui-fg);
+  box-shadow: inset 0 0 0 1px var(--ui-fg);
+}
+.palette-swatches { display: flex; height: 16px; overflow: hidden; border-radius: 5px; }
+.palette-swatch { flex: 1 1 0; }
+.palette-name { display: block; margin-top: 6px; font-size: 12px; font-weight: 600; }
 
 /* ── export panel ──────────────────────────────────────────────────────── */
 
@@ -913,7 +937,9 @@ body.sheet-open .hint { display: none; }
   function seedMaxRadius(s) {
     var m = 1, k;
     for (k = 0; k < s.harm.length; k++) m += Math.abs(s.harm[k].a);
-    return s.r * m * 1.05;
+    var corner = s.sides ? 1 / Math.cos(Math.PI / s.sides) : 1;
+    var polygonReach = 1 + (s.geo || 0) * (corner - 1);
+    return s.r * m * polygonReach * 1.05;
   }
 
   var LUT_N = 1024;
@@ -1470,11 +1496,16 @@ body.sheet-open .hint { display: none; }
    * `sink` only needs moveTo / bezierCurveTo / closePath, so the exact same code
    * feeds both the canvas renderer and the SVG exporter.
    */
-  function emitPath(p, closed, sink) {
+  function emitPath(p, closed, sink, linear) {
     var n = p.length / 2;
     if (n < 2) return;
     var i, p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y;
     sink.moveTo(p[0], p[1]);
+    if (linear && sink.lineTo) {
+      for (i = 1; i < n; i++) sink.lineTo(p[i * 2], p[i * 2 + 1]);
+      if (closed && sink.closePath) sink.closePath();
+      return;
+    }
     if (n === 2) {
       sink.bezierCurveTo(p[0], p[1], p[2], p[3], p[2], p[3]);
       return;
@@ -1510,13 +1541,16 @@ body.sheet-open .hint { display: none; }
 
 /* ---- js/presets.js ---- */
 /*
- * presets.js — parameter defaults and the four named looks.
+ * presets.js — parameter defaults and the six named looks.
  */
 (function (root) {
   'use strict';
   var GA = (root.GA = root.GA || {});
 
   var DEFAULTS = {
+    pattern: 'organic',  // organic | geometric
+    palette: 'mono',     // mono | spectrum | sunset | lagoon
+    colorFlow: 'level',  // level | weave | path
     shapes: 5,
     layout: 'scatter',   // scatter | grid | cluster
     geometry: 0.15,      // 0 = organic blob, 1 = soft polygon
@@ -1537,6 +1571,7 @@ body.sheet-open .hint { display: none; }
       name: 'Topographic',
       note: 'Even, calm contour lines — a survey map.',
       params: {
+        pattern: 'organic', palette: 'mono', colorFlow: 'level',
         shapes: 5, layout: 'scatter', geometry: 0.08, scale: 1,
         layers: 15, spacing: 11.5, lineWidth: 0.95,
         distortion: 0.22, repulsion: 0.34, merge: 0.35,
@@ -1548,6 +1583,7 @@ body.sheet-open .hint { display: none; }
       name: 'Organic',
       note: 'More deformation, asymmetry and merging.',
       params: {
+        pattern: 'organic', palette: 'mono', colorFlow: 'level',
         shapes: 6, layout: 'scatter', geometry: 0.05, scale: 1.05,
         layers: 11, spacing: 15, lineWidth: 1.15,
         distortion: 0.62, repulsion: 0.2, merge: 0.62,
@@ -1559,6 +1595,7 @@ body.sheet-open .hint { display: none; }
       name: 'Tile',
       note: 'Structured and decorative, soft ceramic geometry.',
       params: {
+        pattern: 'organic', palette: 'mono', colorFlow: 'level',
         shapes: 9, layout: 'grid', geometry: 0.8, scale: 0.9,
         layers: 11, spacing: 14, lineWidth: 1.3,
         distortion: 0.12, repulsion: 0.62, merge: 0.18,
@@ -1570,10 +1607,35 @@ body.sheet-open .hint { display: none; }
       name: 'Ruins',
       note: 'Sparse and architectural, slowly overgrown.',
       params: {
+        pattern: 'organic', palette: 'mono', colorFlow: 'level',
         shapes: 5, layout: 'cluster', geometry: 0.6, scale: 1.2,
         layers: 6, spacing: 22, lineWidth: 1.2,
         distortion: 0.72, repulsion: 0.72, merge: 0.15,
         gapProb: 0.38, secondary: 0.65
+      }
+    },
+    {
+      id: 'prism',
+      name: 'Prism',
+      note: 'Crisp nested polygons with a full-spectrum rhythm.',
+      params: {
+        pattern: 'geometric', palette: 'spectrum', colorFlow: 'level',
+        shapes: 7, layout: 'grid', geometry: 0.9, scale: 0.92,
+        layers: 13, spacing: 13, lineWidth: 1.35,
+        distortion: 0.04, repulsion: 0.7, merge: 0.08,
+        gapProb: 0.02, secondary: 0.04
+      }
+    },
+    {
+      id: 'signal',
+      name: 'Signal Grid',
+      note: 'Angular systems, warm colour and a woven cadence.',
+      params: {
+        pattern: 'geometric', palette: 'sunset', colorFlow: 'weave',
+        shapes: 10, layout: 'grid', geometry: 0.72, scale: 0.82,
+        layers: 9, spacing: 17, lineWidth: 1.55,
+        distortion: 0.1, repulsion: 0.48, merge: 0.16,
+        gapProb: 0.12, secondary: 0.08
       }
     }
   ];
@@ -1617,6 +1679,7 @@ body.sheet-open .hint { display: none; }
 
   function makeSeed(rng, x, y, params, groupPool, opts) {
     opts = opts || {};
+    var geometric = params.pattern === 'geometric';
     var harm = [];
     var count = rng.i(2, 3);
     var used = {};
@@ -1626,7 +1689,7 @@ body.sheet-open .hint { display: none; }
       used[m] = 1;
       harm.push({
         m: m,
-        a: rng.f(0.05, 0.17) * (opts.small ? 0.7 : 1),
+        a: rng.f(0.05, 0.17) * (opts.small ? 0.7 : 1) * (geometric ? 0.12 : 1),
         p: rng.f(0, Math.PI * 2)
       });
     }
@@ -1649,10 +1712,12 @@ body.sheet-open .hint { display: none; }
       y: y,
       rr: opts.small ? rng.f(0.55, 0.95) : rng.f(1.1, 2.3),
       harm: harm,
-      geoJ: rng.f(0.72, 1),      // per-seed geometry jitter, applied at resolve
+      geoJ: geometric ? rng.f(0.94, 1) : rng.f(0.72, 1),
       geo: 0,
-      sides: rng.i(4, 7),
-      rot: rng.f(0, Math.PI * 2),
+      sides: geometric ? rng.pick([3, 4, 4, 5, 6, 8]) : rng.i(4, 7),
+      rot: geometric
+        ? Math.round(rng.f(0, Math.PI * 2) / (Math.PI / 12)) * (Math.PI / 12)
+        : rng.f(0, Math.PI * 2),
       group: group,
       small: !!opts.small
     };
@@ -1669,7 +1734,9 @@ body.sheet-open .hint { display: none; }
     for (var i = 0; i < seeds.length; i++) {
       var s = seeds[i];
       s.r = s.rr * sp;
-      s.geo = params.geometry * (s.geoJ == null ? 1 : s.geoJ);
+      s.geo = params.pattern === 'geometric'
+        ? 0.78 + params.geometry * 0.22
+        : params.geometry * (s.geoJ == null ? 1 : s.geoJ);
       s.rMax = GA.seedMaxRadius(s);
       s._lut = null;                   // angular profile cache is now stale
     }
@@ -1812,10 +1879,12 @@ body.sheet-open .hint { display: none; }
     var F = GA.buildField(grid, seeds, {
       sp: sp,
       layers: params.layers,
-      geometry: params.geometry,
+      geometry: params.pattern === 'geometric'
+        ? 0.78 + params.geometry * 0.22
+        : params.geometry,
       distortion: params.distortion,
       repulsion: params.repulsion,
-      mergeBlur: 0.34
+      mergeBlur: params.pattern === 'geometric' ? 0.06 : 0.34
     }, noise);
 
     var tracer = new GA.Tracer(grid.gw, grid.gh);
@@ -1848,7 +1917,9 @@ body.sheet-open .hint { display: none; }
 
         p = GA.geom.resample(p, step, ch.closed);
         if (p.length < 6) continue;
-        p = GA.geom.smooth(p, ch.closed, Q.smoothIters, 0.55);
+        p = GA.geom.smooth(p, ch.closed,
+          params.pattern === 'geometric' ? Math.min(1, Q.smoothIters) : Q.smoothIters,
+          params.pattern === 'geometric' ? 0.28 : 0.55);
 
         /*
          * Thin the point set before it becomes Béziers. The curve is already
@@ -1872,13 +1943,17 @@ body.sheet-open .hint { display: none; }
           for (var q = 0; q < g.parts.length; q++) {
             g.parts[q].w = w;
             g.parts[q].level = L;      // drives the draw-on order
+            g.parts[q].linear = params.pattern === 'geometric';
             paths.push(g.parts[q]);
           }
           if (collectGaps) {
             for (var z = 0; z < g.gaps.length; z++) gapPoints.push(g.gaps[z]);
           }
         } else {
-          paths.push({ pts: p, closed: ch.closed, w: w, level: L });
+          paths.push({
+            pts: p, closed: ch.closed, w: w, level: L,
+            linear: params.pattern === 'geometric'
+          });
         }
       }
     }
@@ -1976,16 +2051,87 @@ body.sheet-open .hint { display: none; }
   var GA = (root.GA = root.GA || {});
 
   /*
-   * The artwork has two colour pairs, and they are a *drawing* decision rather
-   * than an interface theme: PRINT is what gets exported and fabricated, SCREEN
-   * is the inverted pair used when the app is in dark mode so a phone at night
-   * is not showing a blazing white rectangle.
+   * Artwork palettes are a *drawing* decision rather than an interface theme.
+   * PRINT provides the fabrication-safe paper/ink pair; SCREEN_DARK provides
+   * the inverted monochrome base used when a phone is in dark mode.
    */
   var PRINT = { paper: '#faf8f4', ink: '#16161a' };
   var SCREEN_DARK = { paper: '#141418', ink: '#e9e7e1' };
 
+  var PALETTES = {
+    mono: {
+      light: ['#16161a'],
+      dark: ['#e9e7e1']
+    },
+    spectrum: {
+      light: ['#d62839', '#f26b38', '#e9a820', '#15956f', '#237eae', '#6847c6'],
+      dark: ['#ff5d73', '#ff9368', '#ffd166', '#34d6a0', '#4db9e9', '#a58aff']
+    },
+    sunset: {
+      light: ['#c81d25', '#eb5e28', '#f2a900', '#d1495b', '#7b2cbf'],
+      dark: ['#ff5964', '#ff8c42', '#ffd166', '#ef6f8f', '#bd7cff']
+    },
+    lagoon: {
+      light: ['#006d77', '#008f8c', '#2a9d8f', '#277da1', '#4f46b8'],
+      dark: ['#35d0ba', '#5ce1c8', '#90e0d0', '#58b6e7', '#9b8cff']
+    }
+  };
+
   var PAPER = PRINT.paper;
   var INK = PRINT.ink;
+
+  function styleFor(id, dark) {
+    var palette = PALETTES[id] || PALETTES.mono;
+    var colors = (dark ? palette.dark : palette.light).slice();
+    return {
+      paper: dark ? SCREEN_DARK.paper : PRINT.paper,
+      ink: colors[0],
+      colors: colors
+    };
+  }
+
+  function pathColor(path, index, opt) {
+    var colors = opt.colors;
+    if (opt.plotter || !colors || colors.length < 2) return opt.ink || INK;
+    var level = path.level || 0;
+    var key;
+    if (opt.colorFlow === 'weave') key = level * 2 + (index % 4);
+    else if (opt.colorFlow === 'path') key = (index * 7 + Math.floor(index / 3) * 3);
+    else key = level;
+
+    /* While a line is revealing, let it travel through the neighbouring
+       colours before resting on its final one. The animation remains finite
+       and respects reduced-motion because it uses the existing draw-on pass. */
+    if (opt.reveal && opt.reveal[index] > 0 && opt.reveal[index] < 0.999) {
+      key += Math.ceil((1 - opt.reveal[index]) * Math.min(3, colors.length - 1));
+    }
+    key %= colors.length;
+    if (key < 0) key += colors.length;
+    return colors[key];
+  }
+
+  function groupStyled(paths, plotter, opt, include) {
+    opt = opt || {};
+    var map = {}, order = [], i, key, w, color;
+    for (i = 0; i < paths.length; i++) {
+      if (include && !include(i, paths[i])) continue;
+      w = plotter ? 1 : paths[i].w;
+      color = pathColor(paths[i], i, {
+        plotter: plotter,
+        ink: opt.ink,
+        colors: opt.colors,
+        colorFlow: opt.colorFlow,
+        reveal: opt.reveal
+      });
+      key = w.toFixed(3) + '|' + color;
+      if (!map[key]) {
+        map[key] = { w: w, color: color, items: [] };
+        order.push(key);
+      }
+      map[key].items.push({ path: paths[i], index: i });
+    }
+    return order.map(function (k) { return map[k]; });
+  }
 
   /*
    * ctx      canvas 2D context (already sized in device pixels)
@@ -2018,7 +2164,6 @@ body.sheet-open .hint { display: none; }
     ctx.rect(0, 0, art.artW, art.artH);
     ctx.clip();
 
-    ctx.strokeStyle = opt.ink || INK;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     ctx.miterLimit = 2;
@@ -2026,14 +2171,15 @@ body.sheet-open .hint { display: none; }
     if (opt.reveal) drawRevealed(ctx, art, opt);
     else {
       // batch by stroke width so we set state as rarely as possible
-      var buckets = groupByWidth(art.paths, opt.plotter);
+      var buckets = groupStyled(art.paths, opt.plotter, opt);
       for (var b = 0; b < buckets.length; b++) {
         var bucket = buckets[b];
+        ctx.strokeStyle = bucket.color;
         ctx.lineWidth = bucket.w;
         ctx.beginPath();
-        for (var i = 0; i < bucket.paths.length; i++) {
-          var p = bucket.paths[i];
-          GA.geom.emitPath(p.pts, p.closed, ctx);
+        for (var i = 0; i < bucket.items.length; i++) {
+          var p = bucket.items[i].path;
+          GA.geom.emitPath(p.pts, p.closed, ctx, p.linear);
         }
         ctx.stroke();
       }
@@ -2068,22 +2214,18 @@ body.sheet-open .hint { display: none; }
      * which is what keeps the frame cost flat as the drawing fills in — and
      * finished lines are the vast majority for most of the animation.
      */
-    var widths = [];
-    for (i = 0; i < n; i++) {
-      if (reveal[i] < 0.999) continue;
-      w = opt.plotter ? 1 : paths[i].w;
-      if (widths.indexOf(w) === -1) widths.push(w);
-    }
+    var finished = groupStyled(paths, opt.plotter, opt, function (idx) {
+      return reveal[idx] >= 0.999;
+    });
     ctx.setLineDash([]);
-    for (var k = 0; k < widths.length; k++) {
-      w = widths[k];
-      ctx.lineWidth = w;
+    for (var k = 0; k < finished.length; k++) {
+      var bucket = finished[k];
+      ctx.lineWidth = bucket.w;
+      ctx.strokeStyle = bucket.color;
       ctx.beginPath();
-      for (i = 0; i < n; i++) {
-        if (reveal[i] < 0.999) continue;
-        p = paths[i];
-        if ((opt.plotter ? 1 : p.w) !== w) continue;
-        GA.geom.emitPath(p.pts, p.closed, ctx);
+      for (i = 0; i < bucket.items.length; i++) {
+        p = bucket.items[i].path;
+        GA.geom.emitPath(p.pts, p.closed, ctx, p.linear);
       }
       ctx.stroke();
     }
@@ -2093,13 +2235,14 @@ body.sheet-open .hint { display: none; }
       if (t <= 0.001 || t >= 0.999) continue;   // a 0-length dash stamps a dot
       p = paths[i];
       ctx.lineWidth = opt.plotter ? 1 : p.w;
+      ctx.strokeStyle = pathColor(p, i, opt);
       // slight overshoot: the Bézier is a touch longer than the polyline it was
       // measured from, and running over is better than a visible gap at the end
       var L = lengths[i] * 1.04;
       ctx.setLineDash([L * t, L * 2]);
       ctx.lineDashOffset = 0;
       ctx.beginPath();
-      GA.geom.emitPath(p.pts, p.closed, ctx);
+      GA.geom.emitPath(p.pts, p.closed, ctx, p.linear);
       ctx.stroke();
     }
     ctx.setLineDash([]);
@@ -2147,6 +2290,8 @@ body.sheet-open .hint { display: none; }
 
   GA.render = {
     draw: draw, drawSeeds: drawSeeds, groupByWidth: groupByWidth,
+    groupStyled: groupStyled, pathColor: pathColor, styleFor: styleFor,
+    PALETTES: PALETTES,
     PAPER: PAPER, INK: INK, PRINT: PRINT, SCREEN_DARK: SCREEN_DARK
   };
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -2156,8 +2301,9 @@ body.sheet-open .hint { display: none; }
  * exporters.js — PNG, SVG and Web Share.
  *
  * The SVG writer walks exactly the same path list the screen renderer uses and
- * emits `M ... C ...` commands. There is no <image> tag anywhere: the file is
- * genuine vector geometry that a plotter or laser cutter can consume directly.
+ * emits `M ... C ...` curves or `M ... L ...` geometric segments. There is no
+ * <image> tag anywhere: the file is genuine vector geometry that a plotter or
+ * laser cutter can consume directly.
  */
 (function (root) {
   'use strict';
@@ -2174,6 +2320,9 @@ body.sheet-open .hint { display: none; }
   };
   PathSink.prototype.moveTo = function (x, y) {
     this.d += (this.d ? ' ' : '') + 'M' + this._n(x) + ' ' + this._n(y);
+  };
+  PathSink.prototype.lineTo = function (x, y) {
+    this.d += ' L' + this._n(x) + ' ' + this._n(y);
   };
   PathSink.prototype.bezierCurveTo = function (x1, y1, x2, y2, x, y) {
     this.d += ' C' + this._n(x1) + ' ' + this._n(y1) + ' ' +
@@ -2207,16 +2356,22 @@ body.sheet-open .hint { display: none; }
       out.push('  <rect x="0" y="0" width="' + W + '" height="' + H +
         '" fill="' + (opt.paper || GA.render.PAPER) + '"/>');
     }
-    out.push('  <g clip-path="url(#board)" fill="none" stroke="' + ink +
-      '" stroke-linecap="round" stroke-linejoin="round">');
+    out.push('  <g clip-path="url(#board)" fill="none" ' +
+      'stroke-linecap="round" stroke-linejoin="round">');
 
-    var buckets = GA.render.groupByWidth(art.paths, opt.plotter);
+    var buckets = GA.render.groupStyled(art.paths, opt.plotter, {
+      ink: ink,
+      colors: opt.colors,
+      colorFlow: opt.colorFlow
+    });
     for (var b = 0; b < buckets.length; b++) {
       var bucket = buckets[b];
-      out.push('    <g stroke-width="' + (Math.round(bucket.w * 1000) / 1000) + '">');
-      for (var i = 0; i < bucket.paths.length; i++) {
+      out.push('    <g stroke="' + bucket.color + '" stroke-width="' +
+        (Math.round(bucket.w * 1000) / 1000) + '">');
+      for (var i = 0; i < bucket.items.length; i++) {
+        var path = bucket.items[i].path;
         var sink = new PathSink(2);
-        GA.geom.emitPath(bucket.paths[i].pts, bucket.paths[i].closed, sink);
+        GA.geom.emitPath(path.pts, path.closed, sink, path.linear);
         if (sink.d) out.push('      <path d="' + sink.d + '"/>');
       }
       out.push('    </g>');
@@ -2242,6 +2397,8 @@ body.sheet-open .hint { display: none; }
       background: opt.background !== false,
       paper: opt.paper,
       ink: opt.ink,
+      colors: opt.colors,
+      colorFlow: opt.colorFlow,
       plotter: opt.plotter,
       frame: false
     });
@@ -2354,8 +2511,8 @@ body.sheet-open .hint { display: none; }
  * ui.js — control construction and chrome behaviour.
  *
  * The controls are described as data and rendered into tabbed panels, so the
- * phone never shows a long vertical wall of sliders: five short sections
- * (Shape, Contours, Distortion, Gaps, Export) with at most four controls each.
+ * phone never shows a long vertical wall of sliders: six short sections
+ * (Shape, Contours, Distortion, Gaps, Style, Export) with short controls each.
  *
  * Slider protocol: dragging emits phase 'preview' (cheap regeneration), letting
  * go emits phase 'commit' (full quality).
@@ -2369,6 +2526,7 @@ body.sheet-open .hint { display: none; }
     { id: 'contours', label: 'Contours' },
     { id: 'distortion', label: 'Distortion' },
     { id: 'gaps', label: 'Gaps' },
+    { id: 'style', label: 'Style' },
     { id: 'export', label: 'Export' }
   ];
 
@@ -2378,6 +2536,18 @@ body.sheet-open .hint { display: none; }
    * already like.
    */
   var CONTROLS = [
+    { sec: 'style', type: 'seg', key: 'pattern', label: 'Pattern language',
+      options: [['organic', 'Organic'], ['geometric', 'Geometric']], relayout: true },
+    { sec: 'style', type: 'palette', key: 'palette', label: 'Colour palette',
+      options: [
+        ['mono', 'Monochrome', ['#16161a', '#77736b']],
+        ['spectrum', 'Spectrum', ['#e63946', '#f4a261', '#e9c46a', '#2a9d8f', '#457b9d', '#6d45c5']],
+        ['sunset', 'Sunset', ['#d62828', '#f77f00', '#fcbf49', '#7b2cbf']],
+        ['lagoon', 'Lagoon', ['#006d77', '#00a6a6', '#83c5be', '#3a86ff', '#8338ec']]
+      ], renderOnly: true },
+    { sec: 'style', type: 'seg', key: 'colorFlow', label: 'Colour rhythm',
+      options: [['level', 'Rings'], ['weave', 'Weave'], ['path', 'Shuffle']], renderOnly: true },
+
     { sec: 'shape', type: 'slider', key: 'shapes', label: 'Initial shapes',
       sub: 'How many seed forms to start from', min: 2, max: 14, step: 1, dec: 0, relayout: true },
     { sec: 'shape', type: 'seg', key: 'layout', label: 'Placement',
@@ -2458,7 +2628,9 @@ body.sheet-open .hint { display: none; }
     }
 
     CONTROLS.forEach(function (c) {
-      var w = c.type === 'seg' ? makeSegment(c, opts) : makeSlider(c, opts);
+      var w = c.type === 'seg' ? makeSegment(c, opts)
+        : c.type === 'palette' ? makePalette(c, opts)
+        : makeSlider(c, opts);
       panels[c.sec].appendChild(w.node);
       widgets[c.key] = w;
     });
@@ -2597,6 +2769,44 @@ body.sheet-open .hint { display: none; }
     };
   }
 
+  function makePalette(c, opts) {
+    var node = el('div', 'ctl');
+    var head = el('div', 'ctl-head');
+    head.appendChild(el('span', 'ctl-label', c.label));
+    node.appendChild(head);
+    var grid = el('div', 'palette-grid');
+    var buttons = [];
+    c.options.forEach(function (o) {
+      var b = el('button', 'palette-option');
+      b.type = 'button';
+      b.setAttribute('aria-label', o[1] + ' palette');
+      b.setAttribute('aria-pressed', 'false');
+      var swatches = el('span', 'palette-swatches');
+      o[2].forEach(function (color) {
+        var swatch = el('span', 'palette-swatch');
+        swatch.style.backgroundColor = color;
+        swatches.appendChild(swatch);
+      });
+      b.appendChild(swatches);
+      b.appendChild(el('span', 'palette-name', o[1]));
+      b.addEventListener('click', function () {
+        buttons.forEach(function (x) { x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+        opts.onParam(c.key, o[0], 'commit', c);
+      });
+      grid.appendChild(b);
+      buttons.push(b);
+    });
+    node.appendChild(grid);
+    return {
+      node: node,
+      set: function (v) {
+        buttons.forEach(function (b, i) {
+          b.setAttribute('aria-pressed', c.options[i][0] === v ? 'true' : 'false');
+        });
+      }
+    };
+  }
+
   /* --------------------------------------------------------------------- */
   /* Export panel                                                           */
   /* --------------------------------------------------------------------- */
@@ -2652,8 +2862,8 @@ body.sheet-open .hint { display: none; }
     toggleRow('plotter', 'Plotter mode',
       'One uniform hairline weight for every path');
     toggleRow('exportAsShown', 'Match screen colours',
-      'Off always exports dark lines on paper, whatever the theme — that is the ' +
-      'version you print, plot or cut.');
+      'Off exports the selected palette on light paper, whatever the theme — ' +
+      'that is the version you print, plot or cut.');
 
     /* ---- screen-only display options --------------------------------- */
     stack.appendChild(el('div', 'section-title', 'Display'));
@@ -2792,12 +3002,17 @@ body.sheet-open .hint { display: none; }
    * use case here, since it previews exactly what will be printed or cut.
    */
   function artColors() {
-    return (isDark() && flags.invertArt) ? GA.render.SCREEN_DARK : GA.render.PRINT;
+    return GA.render.styleFor(
+      state.params.palette,
+      isDark() && flags.invertArt
+    );
   }
 
   /* Colours a PNG/SVG is written with. Printable by default. */
   function exportColors() {
-    return flags.exportAsShown ? artColors() : GA.render.PRINT;
+    return flags.exportAsShown
+      ? artColors()
+      : GA.render.styleFor(state.params.palette, false);
   }
 
   var pageColor = '#f3f1ec';
@@ -2878,6 +3093,8 @@ body.sheet-open .hint { display: none; }
       background: true,
       paper: col.paper,
       ink: col.ink,
+      colors: col.colors,
+      colorFlow: state.params.colorFlow,
       frameColor: frameColor,
       plotter: flags.plotter,
       frame: true,
@@ -2914,7 +3131,7 @@ body.sheet-open .hint { display: none; }
   /*
    * Only lines still mid-draw need an individual dashed stroke, which is the
    * expensive part; frame time stays at vsync up to roughly this many paths and
-   * climbs past it. All four presets land between 60 and 180, so they always
+   * climbs past it. The bundled presets land between 60 and 180, so they always
    * animate — it is the very dense hand-tuned settings that skip it. SLOW_FRAME
    * is the safety net for devices slower than the one this was measured on:
    * rather than stutter, the drawing simply finishes.
@@ -3180,7 +3397,7 @@ body.sheet-open .hint { display: none; }
 
   // changing any of these makes the cached secondary seeds meaningless
   var INVALIDATES_SECONDARY = {
-    shapes: 1, layout: 1, merge: 1, secondary: 1,
+    shapes: 1, layout: 1, pattern: 1, merge: 1, secondary: 1,
     gapProb: 1, layers: 1, spacing: 1, scale: 1
   };
 
@@ -3192,6 +3409,12 @@ body.sheet-open .hint { display: none; }
     state.params[key] = value;
     state.presetId = 'custom';
     updatePresetChip();
+    if (meta && meta.renderOnly) {
+      if (phase === 'commit') startAnimation(null);
+      draw();
+      save();
+      return;
+    }
     if (meta && meta.relayout) reseed();
     if (INVALIDATES_SECONDARY[key] && phase === 'commit') state.secondary = null;
     request(phase === 'commit' ? 'full' : 'preview');
@@ -3235,6 +3458,8 @@ body.sheet-open .hint { display: none; }
       plotter: flags.plotter,
       paper: col.paper,
       ink: col.ink,
+      colors: col.colors,
+      colorFlow: state.params.colorFlow,
       meta: { seed: state.seed, preset: state.presetId, params: state.params }
     });
     var blob = new Blob([svg], { type: 'image/svg+xml' });
@@ -3249,7 +3474,8 @@ body.sheet-open .hint { display: none; }
     var col = exportColors();
     var c = GA.exporters.toCanvas(art, {
       scale: flags.pngScale, background: flags.background, plotter: flags.plotter,
-      paper: col.paper, ink: col.ink
+      paper: col.paper, ink: col.ink, colors: col.colors,
+      colorFlow: state.params.colorFlow
     });
     GA.exporters.canvasToBlob(c).then(function (blob) {
       return GA.exporters.saveBlob(blob, fileBase() + '.png').then(function () {
@@ -3265,7 +3491,8 @@ body.sheet-open .hint { display: none; }
     var col = exportColors();
     var c = GA.exporters.toCanvas(art, {
       scale: Math.min(flags.pngScale, 3), background: true, plotter: flags.plotter,
-      paper: col.paper, ink: col.ink
+      paper: col.paper, ink: col.ink, colors: col.colors,
+      colorFlow: state.params.colorFlow
     });
     GA.exporters.canvasToBlob(c).then(function (blob) {
       GA.exporters.shareFile(blob, fileBase() + '.png', 'Contour study — seed ' + state.seed)

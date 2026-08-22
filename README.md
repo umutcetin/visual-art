@@ -1,14 +1,19 @@
 # Contours
 
-A single-page generative art tool for imaginary topographic maps and organic
-architectural drawings. No frameworks, no backend, no external APIs — open
+A single-page generative art tool for imaginary topographic maps, colourful
+line systems and geometric pattern studies. No frameworks, no backend, no external APIs — open
 `index.html` in a browser and it runs.
 
 **Live: https://umutcetin.github.io/visual-art/** — installable to a phone home
 screen and fully offline once opened.
 
-Monochrome by default: off-white paper, charcoal lines, no gradients, so the
-output is ready to plot, print, laser-cut or emboss.
+Monochrome remains the default: off-white paper, charcoal lines, no gradients,
+so the output is ready to plot, print, laser-cut or emboss. The **Style** tab
+adds Spectrum, Sunset and Lagoon palettes, three colour rhythms, and a
+Geometric pattern language with straight vector segments. Colour choices are
+preserved in PNG and SVG exports; Plotter mode deliberately collapses them to a
+single ink. The Prism and Signal Grid presets are quick entrances to the new
+geometric system.
 
 Light and dark themes, following the system setting unless you pick one
 explicitly (Export tab → Display, or the More menu). In dark mode the drawing
@@ -27,7 +32,7 @@ js/edt.js             exact Euclidean distance transform
 js/field.js           builds the scalar field the contours are sliced from
 js/contour.js         marching squares + polyline stitching
 js/geom.js            resampling, smoothing, gaps, Catmull-Rom → Bézier
-js/presets.js         defaults and the four named looks
+js/presets.js         defaults and the six named looks
 js/generator.js       seed placement and the generation pass
 js/render.js          canvas drawing
 js/exporters.js       PNG / SVG / Web Share
@@ -105,7 +110,8 @@ so the little shapes genuinely interact with the contours around them rather
 than being drawn on top.
 
 The same path list feeds the canvas renderer and the SVG writer, which is why
-the SVG contains real `M … C …` geometry and never an embedded bitmap.
+the SVG contains real `M … C …` curves (or `M … L …` segments in Geometric
+mode) and never an embedded bitmap.
 
 **Drawing it on.** A new composition arrives line by line rather than all at
 once, innermost contour first, each line drawing itself from one end to the

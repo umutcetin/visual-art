@@ -35,7 +35,7 @@ function buildBody(opts) {
   ).join('\n');
 
   const parts = [];
-  parts.push('<title>Contours — generative topographic drawings</title>');
+  parts.push('<title>Contours — generative colour and geometric drawings</title>');
 
   if (opts.body) {
     /*
@@ -74,7 +74,7 @@ function buildDocument() {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#faf8f4">
-<meta name="description" content="Generative contour drawings — an offline tool for topographic, biomorphic and architectural line art.">
+<meta name="description" content="Generative colour and contour drawings — an offline tool for organic, topographic and geometric line art.">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">

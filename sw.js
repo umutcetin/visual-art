@@ -11,7 +11,7 @@
  * Every path is relative, so this works unchanged whether the app is served
  * from a domain root or a GitHub Pages project subpath.
  */
-var CACHE = 'contours-v3';
+var CACHE = 'contours-v4';
 var ASSETS = [
   './', './index.html', './styles.css', './manifest.webmanifest', './icon.svg',
   './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png',

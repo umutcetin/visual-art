@@ -72,12 +72,17 @@
    * use case here, since it previews exactly what will be printed or cut.
    */
   function artColors() {
-    return (isDark() && flags.invertArt) ? GA.render.SCREEN_DARK : GA.render.PRINT;
+    return GA.render.styleFor(
+      state.params.palette,
+      isDark() && flags.invertArt
+    );
   }
 
   /* Colours a PNG/SVG is written with. Printable by default. */
   function exportColors() {
-    return flags.exportAsShown ? artColors() : GA.render.PRINT;
+    return flags.exportAsShown
+      ? artColors()
+      : GA.render.styleFor(state.params.palette, false);
   }
 
   var pageColor = '#f3f1ec';
@@ -158,6 +163,8 @@
       background: true,
       paper: col.paper,
       ink: col.ink,
+      colors: col.colors,
+      colorFlow: state.params.colorFlow,
       frameColor: frameColor,
       plotter: flags.plotter,
       frame: true,
@@ -194,7 +201,7 @@
   /*
    * Only lines still mid-draw need an individual dashed stroke, which is the
    * expensive part; frame time stays at vsync up to roughly this many paths and
-   * climbs past it. All four presets land between 60 and 180, so they always
+   * climbs past it. The bundled presets land between 60 and 180, so they always
    * animate — it is the very dense hand-tuned settings that skip it. SLOW_FRAME
    * is the safety net for devices slower than the one this was measured on:
    * rather than stutter, the drawing simply finishes.
@@ -460,7 +467,7 @@
 
   // changing any of these makes the cached secondary seeds meaningless
   var INVALIDATES_SECONDARY = {
-    shapes: 1, layout: 1, merge: 1, secondary: 1,
+    shapes: 1, layout: 1, pattern: 1, merge: 1, secondary: 1,
     gapProb: 1, layers: 1, spacing: 1, scale: 1
   };
 
@@ -472,6 +479,12 @@
     state.params[key] = value;
     state.presetId = 'custom';
     updatePresetChip();
+    if (meta && meta.renderOnly) {
+      if (phase === 'commit') startAnimation(null);
+      draw();
+      save();
+      return;
+    }
     if (meta && meta.relayout) reseed();
     if (INVALIDATES_SECONDARY[key] && phase === 'commit') state.secondary = null;
     request(phase === 'commit' ? 'full' : 'preview');
@@ -515,6 +528,8 @@
       plotter: flags.plotter,
       paper: col.paper,
       ink: col.ink,
+      colors: col.colors,
+      colorFlow: state.params.colorFlow,
       meta: { seed: state.seed, preset: state.presetId, params: state.params }
     });
     var blob = new Blob([svg], { type: 'image/svg+xml' });
@@ -529,7 +544,8 @@
     var col = exportColors();
     var c = GA.exporters.toCanvas(art, {
       scale: flags.pngScale, background: flags.background, plotter: flags.plotter,
-      paper: col.paper, ink: col.ink
+      paper: col.paper, ink: col.ink, colors: col.colors,
+      colorFlow: state.params.colorFlow
     });
     GA.exporters.canvasToBlob(c).then(function (blob) {
       return GA.exporters.saveBlob(blob, fileBase() + '.png').then(function () {
@@ -545,7 +561,8 @@
     var col = exportColors();
     var c = GA.exporters.toCanvas(art, {
       scale: Math.min(flags.pngScale, 3), background: true, plotter: flags.plotter,
-      paper: col.paper, ink: col.ink
+      paper: col.paper, ink: col.ink, colors: col.colors,
+      colorFlow: state.params.colorFlow
     });
     GA.exporters.canvasToBlob(c).then(function (blob) {
       GA.exporters.shareFile(blob, fileBase() + '.png', 'Contour study — seed ' + state.seed)

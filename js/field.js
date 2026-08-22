@@ -54,7 +54,9 @@
   function seedMaxRadius(s) {
     var m = 1, k;
     for (k = 0; k < s.harm.length; k++) m += Math.abs(s.harm[k].a);
-    return s.r * m * 1.05;
+    var corner = s.sides ? 1 / Math.cos(Math.PI / s.sides) : 1;
+    var polygonReach = 1 + (s.geo || 0) * (corner - 1);
+    return s.r * m * polygonReach * 1.05;
   }
 
   var LUT_N = 1024;

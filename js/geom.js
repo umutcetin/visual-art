@@ -148,11 +148,16 @@
    * `sink` only needs moveTo / bezierCurveTo / closePath, so the exact same code
    * feeds both the canvas renderer and the SVG exporter.
    */
-  function emitPath(p, closed, sink) {
+  function emitPath(p, closed, sink, linear) {
     var n = p.length / 2;
     if (n < 2) return;
     var i, p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y;
     sink.moveTo(p[0], p[1]);
+    if (linear && sink.lineTo) {
+      for (i = 1; i < n; i++) sink.lineTo(p[i * 2], p[i * 2 + 1]);
+      if (closed && sink.closePath) sink.closePath();
+      return;
+    }
     if (n === 2) {
       sink.bezierCurveTo(p[0], p[1], p[2], p[3], p[2], p[3]);
       return;

@@ -2,8 +2,8 @@
  * ui.js — control construction and chrome behaviour.
  *
  * The controls are described as data and rendered into tabbed panels, so the
- * phone never shows a long vertical wall of sliders: five short sections
- * (Shape, Contours, Distortion, Gaps, Export) with at most four controls each.
+ * phone never shows a long vertical wall of sliders: six short sections
+ * (Shape, Contours, Distortion, Gaps, Style, Export) with short controls each.
  *
  * Slider protocol: dragging emits phase 'preview' (cheap regeneration), letting
  * go emits phase 'commit' (full quality).
@@ -17,6 +17,7 @@
     { id: 'contours', label: 'Contours' },
     { id: 'distortion', label: 'Distortion' },
     { id: 'gaps', label: 'Gaps' },
+    { id: 'style', label: 'Style' },
     { id: 'export', label: 'Export' }
   ];
 
@@ -26,6 +27,18 @@
    * already like.
    */
   var CONTROLS = [
+    { sec: 'style', type: 'seg', key: 'pattern', label: 'Pattern language',
+      options: [['organic', 'Organic'], ['geometric', 'Geometric']], relayout: true },
+    { sec: 'style', type: 'palette', key: 'palette', label: 'Colour palette',
+      options: [
+        ['mono', 'Monochrome', ['#16161a', '#77736b']],
+        ['spectrum', 'Spectrum', ['#e63946', '#f4a261', '#e9c46a', '#2a9d8f', '#457b9d', '#6d45c5']],
+        ['sunset', 'Sunset', ['#d62828', '#f77f00', '#fcbf49', '#7b2cbf']],
+        ['lagoon', 'Lagoon', ['#006d77', '#00a6a6', '#83c5be', '#3a86ff', '#8338ec']]
+      ], renderOnly: true },
+    { sec: 'style', type: 'seg', key: 'colorFlow', label: 'Colour rhythm',
+      options: [['level', 'Rings'], ['weave', 'Weave'], ['path', 'Shuffle']], renderOnly: true },
+
     { sec: 'shape', type: 'slider', key: 'shapes', label: 'Initial shapes',
       sub: 'How many seed forms to start from', min: 2, max: 14, step: 1, dec: 0, relayout: true },
     { sec: 'shape', type: 'seg', key: 'layout', label: 'Placement',
@@ -106,7 +119,9 @@
     }
 
     CONTROLS.forEach(function (c) {
-      var w = c.type === 'seg' ? makeSegment(c, opts) : makeSlider(c, opts);
+      var w = c.type === 'seg' ? makeSegment(c, opts)
+        : c.type === 'palette' ? makePalette(c, opts)
+        : makeSlider(c, opts);
       panels[c.sec].appendChild(w.node);
       widgets[c.key] = w;
     });
@@ -245,6 +260,44 @@
     };
   }
 
+  function makePalette(c, opts) {
+    var node = el('div', 'ctl');
+    var head = el('div', 'ctl-head');
+    head.appendChild(el('span', 'ctl-label', c.label));
+    node.appendChild(head);
+    var grid = el('div', 'palette-grid');
+    var buttons = [];
+    c.options.forEach(function (o) {
+      var b = el('button', 'palette-option');
+      b.type = 'button';
+      b.setAttribute('aria-label', o[1] + ' palette');
+      b.setAttribute('aria-pressed', 'false');
+      var swatches = el('span', 'palette-swatches');
+      o[2].forEach(function (color) {
+        var swatch = el('span', 'palette-swatch');
+        swatch.style.backgroundColor = color;
+        swatches.appendChild(swatch);
+      });
+      b.appendChild(swatches);
+      b.appendChild(el('span', 'palette-name', o[1]));
+      b.addEventListener('click', function () {
+        buttons.forEach(function (x) { x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+        opts.onParam(c.key, o[0], 'commit', c);
+      });
+      grid.appendChild(b);
+      buttons.push(b);
+    });
+    node.appendChild(grid);
+    return {
+      node: node,
+      set: function (v) {
+        buttons.forEach(function (b, i) {
+          b.setAttribute('aria-pressed', c.options[i][0] === v ? 'true' : 'false');
+        });
+      }
+    };
+  }
+
   /* --------------------------------------------------------------------- */
   /* Export panel                                                           */
   /* --------------------------------------------------------------------- */
@@ -300,8 +353,8 @@
     toggleRow('plotter', 'Plotter mode',
       'One uniform hairline weight for every path');
     toggleRow('exportAsShown', 'Match screen colours',
-      'Off always exports dark lines on paper, whatever the theme — that is the ' +
-      'version you print, plot or cut.');
+      'Off exports the selected palette on light paper, whatever the theme — ' +
+      'that is the version you print, plot or cut.');
 
     /* ---- screen-only display options --------------------------------- */
     stack.appendChild(el('div', 'section-title', 'Display'));

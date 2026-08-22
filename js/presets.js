@@ -1,11 +1,14 @@
 /*
- * presets.js — parameter defaults and the four named looks.
+ * presets.js — parameter defaults and the six named looks.
  */
 (function (root) {
   'use strict';
   var GA = (root.GA = root.GA || {});
 
   var DEFAULTS = {
+    pattern: 'organic',  // organic | geometric
+    palette: 'mono',     // mono | spectrum | sunset | lagoon
+    colorFlow: 'level',  // level | weave | path
     shapes: 5,
     layout: 'scatter',   // scatter | grid | cluster
     geometry: 0.15,      // 0 = organic blob, 1 = soft polygon
@@ -26,6 +29,7 @@
       name: 'Topographic',
       note: 'Even, calm contour lines — a survey map.',
       params: {
+        pattern: 'organic', palette: 'mono', colorFlow: 'level',
         shapes: 5, layout: 'scatter', geometry: 0.08, scale: 1,
         layers: 15, spacing: 11.5, lineWidth: 0.95,
         distortion: 0.22, repulsion: 0.34, merge: 0.35,
@@ -37,6 +41,7 @@
       name: 'Organic',
       note: 'More deformation, asymmetry and merging.',
       params: {
+        pattern: 'organic', palette: 'mono', colorFlow: 'level',
         shapes: 6, layout: 'scatter', geometry: 0.05, scale: 1.05,
         layers: 11, spacing: 15, lineWidth: 1.15,
         distortion: 0.62, repulsion: 0.2, merge: 0.62,
@@ -48,6 +53,7 @@
       name: 'Tile',
       note: 'Structured and decorative, soft ceramic geometry.',
       params: {
+        pattern: 'organic', palette: 'mono', colorFlow: 'level',
         shapes: 9, layout: 'grid', geometry: 0.8, scale: 0.9,
         layers: 11, spacing: 14, lineWidth: 1.3,
         distortion: 0.12, repulsion: 0.62, merge: 0.18,
@@ -59,10 +65,35 @@
       name: 'Ruins',
       note: 'Sparse and architectural, slowly overgrown.',
       params: {
+        pattern: 'organic', palette: 'mono', colorFlow: 'level',
         shapes: 5, layout: 'cluster', geometry: 0.6, scale: 1.2,
         layers: 6, spacing: 22, lineWidth: 1.2,
         distortion: 0.72, repulsion: 0.72, merge: 0.15,
         gapProb: 0.38, secondary: 0.65
+      }
+    },
+    {
+      id: 'prism',
+      name: 'Prism',
+      note: 'Crisp nested polygons with a full-spectrum rhythm.',
+      params: {
+        pattern: 'geometric', palette: 'spectrum', colorFlow: 'level',
+        shapes: 7, layout: 'grid', geometry: 0.9, scale: 0.92,
+        layers: 13, spacing: 13, lineWidth: 1.35,
+        distortion: 0.04, repulsion: 0.7, merge: 0.08,
+        gapProb: 0.02, secondary: 0.04
+      }
+    },
+    {
+      id: 'signal',
+      name: 'Signal Grid',
+      note: 'Angular systems, warm colour and a woven cadence.',
+      params: {
+        pattern: 'geometric', palette: 'sunset', colorFlow: 'weave',
+        shapes: 10, layout: 'grid', geometry: 0.72, scale: 0.82,
+        layers: 9, spacing: 17, lineWidth: 1.55,
+        distortion: 0.1, repulsion: 0.48, merge: 0.16,
+        gapProb: 0.12, secondary: 0.08
       }
     }
   ];

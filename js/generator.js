@@ -28,6 +28,7 @@
 
   function makeSeed(rng, x, y, params, groupPool, opts) {
     opts = opts || {};
+    var geometric = params.pattern === 'geometric';
     var harm = [];
     var count = rng.i(2, 3);
     var used = {};
@@ -37,7 +38,7 @@
       used[m] = 1;
       harm.push({
         m: m,
-        a: rng.f(0.05, 0.17) * (opts.small ? 0.7 : 1),
+        a: rng.f(0.05, 0.17) * (opts.small ? 0.7 : 1) * (geometric ? 0.12 : 1),
         p: rng.f(0, Math.PI * 2)
       });
     }
@@ -60,10 +61,12 @@
       y: y,
       rr: opts.small ? rng.f(0.55, 0.95) : rng.f(1.1, 2.3),
       harm: harm,
-      geoJ: rng.f(0.72, 1),      // per-seed geometry jitter, applied at resolve
+      geoJ: geometric ? rng.f(0.94, 1) : rng.f(0.72, 1),
       geo: 0,
-      sides: rng.i(4, 7),
-      rot: rng.f(0, Math.PI * 2),
+      sides: geometric ? rng.pick([3, 4, 4, 5, 6, 8]) : rng.i(4, 7),
+      rot: geometric
+        ? Math.round(rng.f(0, Math.PI * 2) / (Math.PI / 12)) * (Math.PI / 12)
+        : rng.f(0, Math.PI * 2),
       group: group,
       small: !!opts.small
     };
@@ -80,7 +83,9 @@
     for (var i = 0; i < seeds.length; i++) {
       var s = seeds[i];
       s.r = s.rr * sp;
-      s.geo = params.geometry * (s.geoJ == null ? 1 : s.geoJ);
+      s.geo = params.pattern === 'geometric'
+        ? 0.78 + params.geometry * 0.22
+        : params.geometry * (s.geoJ == null ? 1 : s.geoJ);
       s.rMax = GA.seedMaxRadius(s);
       s._lut = null;                   // angular profile cache is now stale
     }
@@ -223,10 +228,12 @@
     var F = GA.buildField(grid, seeds, {
       sp: sp,
       layers: params.layers,
-      geometry: params.geometry,
+      geometry: params.pattern === 'geometric'
+        ? 0.78 + params.geometry * 0.22
+        : params.geometry,
       distortion: params.distortion,
       repulsion: params.repulsion,
-      mergeBlur: 0.34
+      mergeBlur: params.pattern === 'geometric' ? 0.06 : 0.34
     }, noise);
 
     var tracer = new GA.Tracer(grid.gw, grid.gh);
@@ -259,7 +266,9 @@
 
         p = GA.geom.resample(p, step, ch.closed);
         if (p.length < 6) continue;
-        p = GA.geom.smooth(p, ch.closed, Q.smoothIters, 0.55);
+        p = GA.geom.smooth(p, ch.closed,
+          params.pattern === 'geometric' ? Math.min(1, Q.smoothIters) : Q.smoothIters,
+          params.pattern === 'geometric' ? 0.28 : 0.55);
 
         /*
          * Thin the point set before it becomes Béziers. The curve is already
@@ -283,13 +292,17 @@
           for (var q = 0; q < g.parts.length; q++) {
             g.parts[q].w = w;
             g.parts[q].level = L;      // drives the draw-on order
+            g.parts[q].linear = params.pattern === 'geometric';
             paths.push(g.parts[q]);
           }
           if (collectGaps) {
             for (var z = 0; z < g.gaps.length; z++) gapPoints.push(g.gaps[z]);
           }
         } else {
-          paths.push({ pts: p, closed: ch.closed, w: w, level: L });
+          paths.push({
+            pts: p, closed: ch.closed, w: w, level: L,
+            linear: params.pattern === 'geometric'
+          });
         }
       }
     }

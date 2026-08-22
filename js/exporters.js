@@ -2,8 +2,9 @@
  * exporters.js — PNG, SVG and Web Share.
  *
  * The SVG writer walks exactly the same path list the screen renderer uses and
- * emits `M ... C ...` commands. There is no <image> tag anywhere: the file is
- * genuine vector geometry that a plotter or laser cutter can consume directly.
+ * emits `M ... C ...` curves or `M ... L ...` geometric segments. There is no
+ * <image> tag anywhere: the file is genuine vector geometry that a plotter or
+ * laser cutter can consume directly.
  */
 (function (root) {
   'use strict';
@@ -20,6 +21,9 @@
   };
   PathSink.prototype.moveTo = function (x, y) {
     this.d += (this.d ? ' ' : '') + 'M' + this._n(x) + ' ' + this._n(y);
+  };
+  PathSink.prototype.lineTo = function (x, y) {
+    this.d += ' L' + this._n(x) + ' ' + this._n(y);
   };
   PathSink.prototype.bezierCurveTo = function (x1, y1, x2, y2, x, y) {
     this.d += ' C' + this._n(x1) + ' ' + this._n(y1) + ' ' +
@@ -53,16 +57,22 @@
       out.push('  <rect x="0" y="0" width="' + W + '" height="' + H +
         '" fill="' + (opt.paper || GA.render.PAPER) + '"/>');
     }
-    out.push('  <g clip-path="url(#board)" fill="none" stroke="' + ink +
-      '" stroke-linecap="round" stroke-linejoin="round">');
+    out.push('  <g clip-path="url(#board)" fill="none" ' +
+      'stroke-linecap="round" stroke-linejoin="round">');
 
-    var buckets = GA.render.groupByWidth(art.paths, opt.plotter);
+    var buckets = GA.render.groupStyled(art.paths, opt.plotter, {
+      ink: ink,
+      colors: opt.colors,
+      colorFlow: opt.colorFlow
+    });
     for (var b = 0; b < buckets.length; b++) {
       var bucket = buckets[b];
-      out.push('    <g stroke-width="' + (Math.round(bucket.w * 1000) / 1000) + '">');
-      for (var i = 0; i < bucket.paths.length; i++) {
+      out.push('    <g stroke="' + bucket.color + '" stroke-width="' +
+        (Math.round(bucket.w * 1000) / 1000) + '">');
+      for (var i = 0; i < bucket.items.length; i++) {
+        var path = bucket.items[i].path;
         var sink = new PathSink(2);
-        GA.geom.emitPath(bucket.paths[i].pts, bucket.paths[i].closed, sink);
+        GA.geom.emitPath(path.pts, path.closed, sink, path.linear);
         if (sink.d) out.push('      <path d="' + sink.d + '"/>');
       }
       out.push('    </g>');
@@ -88,6 +98,8 @@
       background: opt.background !== false,
       paper: opt.paper,
       ink: opt.ink,
+      colors: opt.colors,
+      colorFlow: opt.colorFlow,
       plotter: opt.plotter,
       frame: false
     });
